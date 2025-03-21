@@ -6,7 +6,7 @@ requirements_package = [
     "scipy"]
 
 setup(
-    name="gui_toolbox",
+    name="vision_toolbox",
     version="0.0.1",
     description="",
     url="https://github.com/SEOULTECH-AIS-gyounghun6612/AIS_vision_toolbox.git",
