@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from typing import Literal, Generic, TypeVar
@@ -6,7 +5,7 @@ from dataclasses import dataclass, field, fields, InitVar, asdict
 from pathlib import Path
 
 from numpy import (
-    ndarray, eye, zeros, uint8, save, load, empty, savez, savez_compressed)
+    ndarray, eye, zeros, uint8, save, load, empty, savez, savez_compressed, r_)
 from numpy.linalg import inv
 from scipy.spatial.transform import Rotation as R
 
@@ -191,7 +190,7 @@ class Camera(Sensor, Pose):
 
     def To_line(self):
         _rx, _tx = self.Get_pose_to_vector("quat")
-        _string = ",".join(map(str, self.k_values + _rx + _tx))
+        _string = ",".join(map(str, self.k_values + r_[_rx, _tx].tolist()))
         return f"{_string},{self.file_name}"
 
     def From_line(self, *line: str):
