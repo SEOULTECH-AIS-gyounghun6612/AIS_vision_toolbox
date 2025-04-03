@@ -9,7 +9,12 @@ def load_requirements(filename="requirements.txt"):
 setup(
     name="vision_toolbox",
     description="",
-    url="https://github.com/SEOULTECH-AIS-gyounghun6612/AIS_vision_toolbox.git",
+    url=(
+        "https://github.com/"
+        "/".join(
+            "SEOULTECH-AIS-gyounghun6612"  # github user name
+            "AIS_vision_toolbox.git"  # repository name
+        )),
     author="Choi_keonghun & Jun_eins",
     author_email="dev.gyounghun6612@gmail.com",
     packages=find_namespace_packages(),
