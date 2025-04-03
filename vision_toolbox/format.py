@@ -15,6 +15,18 @@ import cv2
 ROTATION = tuple[Literal["euler", "rovec", "quat"], list[float]]
 
 
+class utils():
+    @staticmethod
+    def K_value_to_intrinsic(k_value: list[float]):  # fx, fy, cx, cy
+        _in = eye(9)
+        _in[[0, 4, 2, 5]] = k_value
+        return _in.reshape(3, 3)
+
+    @staticmethod
+    def Intrinsice_to_k_value(intrinsic: ndarray):
+        return intrinsic[:3, :3].reshape(-1)[[0, 4, 2, 5]]
+
+
 @dataclass
 class Pose():
     """
@@ -72,31 +84,14 @@ class Pose():
 
         return _r_v, self.transfer
 
-    def Get_w2c(self):
-        """
-        Converts the camera's quaternion and translation into a 4x4
-        extrinsic transformation matrix
-
-        ------------------------------------------------------------------
-        ### Returns
-        - `EXTRINSIC`: 4x4 world-to-camera transformation matrix
-
-        """
+    def Get_transpose(self):
         _w2c: ndarray = eye(4)
         _w2c[:3, :3] = self.rotation.as_matrix()
         _w2c[:3, 3] = self.transfer
         return _w2c
 
-    def Get_c2w(self):
-        """
-        Computes the inverse of the world-to-camera transformation matrix
-
-        ------------------------------------------------------------------
-        ### Returns
-        - `EXTRINSIC`: 4x4 camera-to-world transformation matrix
-
-        """
-        return inv(self.Get_w2c())
+    def Get_inv_transpose(self):
+        return inv(self.Get_transpose())
 
     # def To_list(self, rx_type: Literal["euler", "rovec", "quat"] = "quat"):
     #     _r_v, _t_v = self.Get_pose_to_vector(rx_type)
