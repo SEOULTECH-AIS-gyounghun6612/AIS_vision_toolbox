@@ -15,7 +15,7 @@ class Process():
         FAR = auto()
 
     @staticmethod
-    def Adjust_rgb_by_width(
+    def Adjust_width(
         img: ndarray, mode: Crop_Mode, gap: int, unit: int = 14
     ) -> ndarray:
         if mode == Process.Crop_Mode.NEAR:
@@ -32,7 +32,7 @@ class Process():
         return pad(img, ((0, 0), (_st, _ed)), constant_values=1.0)
 
     @staticmethod
-    def Adjust_rgb_by_height(
+    def Adjust_height(
         img: ndarray, mode: Crop_Mode, gap: int, unit: int = 14
     ) -> ndarray:
         if mode == Process.Crop_Mode.NEAR:
