@@ -1,18 +1,40 @@
 from __future__ import annotations
 
-from typing import Literal, Generic, TypeVar
+from typing import Literal, Generic, TypeVar, Annotated
 from dataclasses import dataclass, field, fields, InitVar, asdict
 from pathlib import Path
 
 from numpy import (
-    ndarray, eye, zeros, uint8, save, load, empty, savez, savez_compressed, r_)
+    ndarray, int64, uint8, float32,
+    empty, eye, zeros,
+    load, save, savez, savez_compressed,
+    matmul, 
+    r_, unique
+)
 from numpy.linalg import inv
+from numpy.typing import NDArray
 from scipy.spatial.transform import Rotation as R
 
 import cv2
 
 
-ROTATION = tuple[Literal["euler", "rovec", "quat"], list[float]]
+# ROTATION = tuple[Literal["euler", "rovec", "quat"], list[float]]
+
+
+def Matrix_2_quat(matrix: ndarray) -> ndarray:
+    return R.from_matrix(matrix).as_quat(scalar_first=True)
+
+
+def Quat_2_matrix(quat: ndarray) -> ndarray:
+    return R.from_quat(quat, scalar_first=True).as_matrix()
+
+
+def Matrix_2_rotvec(matrix: ndarray) -> ndarray:
+    return R.from_matrix(matrix).as_rotvec(degrees=True)
+
+
+def Rotvec_2_matrix(rotvec: ndarray) -> ndarray:
+    return R.from_rotve(rotvec, degrees=True).as_matrix()
 
 
 class utils():
@@ -25,6 +47,29 @@ class utils():
     @staticmethod
     def Intrinsice_to_k_value(intrinsic: ndarray):
         return intrinsic[:3, :3].reshape(-1)[[0, 4, 2, 5]]
+
+    @staticmethod
+    def Remove_duplicate(pts: ndarray, precision: int):
+        _scale: int = 10 ** precision
+        _scaled = (pts * _scale).round().astype(int64)  # 정수형 변환
+        _, _indices = unique(_scaled, axis=0, return_index=True)
+
+        return pts[_indices], _indices
+
+    @staticmethod
+    def Pose_align(from_cam_tp: ndarray, to_cam_tp: ndarray):
+        assert len(from_cam_tp) == len(to_cam_tp)
+
+        _tp: ndarray = matmul(
+            to_cam_tp, inv(from_cam_tp)
+        )
+        _align = eye(4)
+
+        _align[:3, :3] = Rotvec_2_matrix(
+            Matrix_2_rotvec(_tp[:, :3, :3]).mean(axis=0))
+        _align[:3, 3] = _tp[:, :3, 3].mean(axis=0)
+
+        return _align
 
 
 @dataclass
@@ -58,9 +103,20 @@ class Pose():
 
     def Set_pose_from_vector(
         self,
-        rx_type: Literal["euler", "rovec", "quat"], rx: list[float],
+        rx_type: Literal["euler", "rovec", "quat"],
+        rx: Annotated[NDArray[float32], ("b", Literal[3] | Literal[4])],
         tx: list[float]
     ):
+        _shape: int = 4 if rx_type == "quat" else 3
+        assert rx.ndim == 2 and rx.shape[1] == _shape, "check the rotation"
+
+        if rx_type == "quat":
+            self.rotation = R.from_quat(tuple(rx), scalar_first=True)
+        elif rx_type == "rovec":
+            self.rotation = R.from_rovec(tuple(rx), degrees=True)
+        else:
+            self.rotation = R.from_euler("xyz", tuple(rx), degrees=True)
+
         if rx_type == "quat":
             self.rotation = R.from_quat(tuple(rx[:4]), scalar_first=True)
         elif rx_type == "rovec":
