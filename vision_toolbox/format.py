@@ -1,396 +1,266 @@
 from __future__ import annotations
 
-from typing import Literal, Generic, TypeVar, Annotated
-from dataclasses import dataclass, field, fields, InitVar, asdict
+from typing import Annotated, Any
+from dataclasses import dataclass, field  # fields
 from pathlib import Path
 
-from numpy import (
-    ndarray, int64, uint8, float32,
-    empty, eye, zeros,
-    load, save, savez, savez_compressed,
-    matmul, 
-    r_, unique
-)
-from numpy.linalg import inv
+import numpy as np
 from numpy.typing import NDArray
-from scipy.spatial.transform import Rotation as R
+from numpy.linalg import inv
 
-import cv2
-
-
-# ROTATION = tuple[Literal["euler", "rovec", "quat"], list[float]]
-
-
-def Matrix_2_quat(matrix: ndarray) -> ndarray:
-    return R.from_matrix(matrix).as_quat(scalar_first=True)
-
-
-def Quat_2_matrix(quat: ndarray) -> ndarray:
-    return R.from_quat(quat, scalar_first=True).as_matrix()
-
-
-def Matrix_2_rotvec(matrix: ndarray) -> ndarray:
-    return R.from_matrix(matrix).as_rotvec(degrees=True)
-
-
-def Rotvec_2_matrix(rotvec: ndarray) -> ndarray:
-    return R.from_rotve(rotvec, degrees=True).as_matrix()
+from vision_toolbox.utils import (
+    QUAT, TF, TP, INTRINSIC, VEC_2, VEC_3, VEC_4, IMG_SIZE, PTS_COLOR,
+    IMG_1C_GROUP, IMG_3C_GROUP,
+    Camera_Process, Convert
+)
 
 
 class utils():
     @staticmethod
-    def K_value_to_intrinsic(k_value: list[float]):  # fx, fy, cx, cy
-        _in = eye(9)
-        _in[[0, 4, 2, 5]] = k_value
-        return _in.reshape(3, 3)
+    def Tranpose_align(
+        from_tp: TP, to_tp: TP
+    ) -> Annotated[NDArray, (4, 4)]:
+        assert len(from_tp) == len(to_tp)
 
-    @staticmethod
-    def Intrinsice_to_k_value(intrinsic: ndarray):
-        return intrinsic[:3, :3].reshape(-1)[[0, 4, 2, 5]]
+        _tp: TP = np.matmul(to_tp, np.linalg.inv(from_tp))
+        _tr = np.eye(4)
 
-    @staticmethod
-    def Remove_duplicate(pts: ndarray, precision: int):
-        _scale: int = 10 ** precision
-        _scaled = (pts * _scale).round().astype(int64)  # 정수형 변환
-        _, _indices = unique(_scaled, axis=0, return_index=True)
+        _tr[:3, :3] = Convert.Rv_2_M(
+            Convert.M_2_Rv(_tp[:, :3, :3]).mean(axis=0))
+        _tr[:3, 3] = _tp[:, :3, 3].mean(axis=0)
 
-        return pts[_indices], _indices
+        return _tr
 
-    @staticmethod
-    def Pose_align(from_cam_tp: ndarray, to_cam_tp: ndarray):
-        assert len(from_cam_tp) == len(to_cam_tp)
 
-        _tp: ndarray = matmul(
-            to_cam_tp, inv(from_cam_tp)
+class Vision_Object():
+    @dataclass
+    class Basement():
+        def Load(self, path: str | Path) -> bool:
+            raise NotImplementedError
+
+        def Save(self, path: str | Path, force: bool = True) -> bool:
+            raise NotImplementedError
+
+        def Push(self, **kwarg):
+            raise NotImplementedError
+
+        def Pop(self, data_num: int | list[int]):
+            raise NotImplementedError
+
+        def Capture(self):
+            raise NotImplementedError
+
+        def To_dict(self) -> dict[str, Any]:
+            raise NotImplementedError
+
+        def From_dict(self, **data):
+            raise NotImplementedError
+
+        @staticmethod
+        def Get_annotation() -> str:
+            raise NotImplementedError
+
+    @dataclass
+    class Camera(Basement):
+        fov: VEC_2 = field(
+            default_factory=lambda: np.ones((1, 2)) * np.pi * 2 / 3
         )
-        _align = eye(4)
-
-        _align[:3, :3] = Rotvec_2_matrix(
-            Matrix_2_rotvec(_tp[:, :3, :3]).mean(axis=0))
-        _align[:3, 3] = _tp[:, :3, 3].mean(axis=0)
-
-        return _align
-
-
-@dataclass
-class Pose():
-    """
-    Represents a camera with intrinsic and extrinsic parameters
-
-    This implementation follows a `Right-Handed Coordinate System`
-
-    ---------------------------------------------------------------------
-    ### Args
-    - `rotation`: Quaternion rotation (qw, qx, qy, qz)
-    - `transfer`: Translation vector (dx, dy, dz)
-
-    ### Structure
-    - `Get_w2c`: Computes the world-to-camera transformation matrix
-    - `Get_c2w`: Computes the camera-to-world transformation matrix
-    - `Get_intrinsic`: Computes the intrinsic matrix
-    - `convert_`: Converts rotation and translation representation
-
-    """
-    rotation: R = field(default_factory=lambda: R.from_quat(
-        quat=(1, 0, 0, 0),
-        scalar_first=True
-    ))
-    # dx, dy, dz
-    transfer: list[float] = field(default_factory=lambda: [0, 0, 0])
-
-    # file_name: InitVar[str]
-    # image: ndarray | None = field(init=False)
-
-    def Set_pose_from_vector(
-        self,
-        rx_type: Literal["euler", "rovec", "quat"],
-        rx: Annotated[NDArray[float32], ("b", Literal[3] | Literal[4])],
-        tx: list[float]
-    ):
-        _shape: int = 4 if rx_type == "quat" else 3
-        assert rx.ndim == 2 and rx.shape[1] == _shape, "check the rotation"
-
-        if rx_type == "quat":
-            self.rotation = R.from_quat(tuple(rx), scalar_first=True)
-        elif rx_type == "rovec":
-            self.rotation = R.from_rovec(tuple(rx), degrees=True)
-        else:
-            self.rotation = R.from_euler("xyz", tuple(rx), degrees=True)
-
-        if rx_type == "quat":
-            self.rotation = R.from_quat(tuple(rx[:4]), scalar_first=True)
-        elif rx_type == "rovec":
-            self.rotation = R.from_rovec(tuple(rx[:3]), degrees=True)
-        else:
-            self.rotation = R.from_euler("xyz", tuple(rx[:3]), degrees=True)
-
-        self.transfer = tx
-
-    def Get_pose_to_vector(
-        self, rx_type: Literal["euler", "rovec", "quat"]
-    ) -> tuple[list[float], list[float]]:
-        if rx_type == "quat":
-            _r_v: list[float] = self.rotation.as_quat(scalar_first=True)
-        elif rx_type == "rovec":
-            _r_v: list[float] = self.rotation.as_rotvec(degrees=True)
-        elif rx_type == "euler":
-            _r_v: list[float] = self.rotation.as_euler("xyz", degrees=True)
-        else:
-            raise ValueError("알 수 없는 회전 형식")
-
-        return _r_v, self.transfer
-
-    def Get_transpose(self):
-        _w2c: ndarray = eye(4)
-        _w2c[:3, :3] = self.rotation.as_matrix()
-        _w2c[:3, 3] = self.transfer
-        return _w2c
-
-    def Get_inv_transpose(self):
-        return inv(self.Get_transpose())
-
-    # def To_list(self, rx_type: Literal["euler", "rovec", "quat"] = "quat"):
-    #     _r_v, _t_v = self.Get_pose_to_vector(rx_type)
-
-    #     return ",".join([f"{_v:>.5f}" for _v in _r_v + _t_v])
-
-
-@dataclass
-class Sensor():
-    file_name: str = ""
-
-    def Load(self, path: str | Path) -> bool:
-        raise NotImplementedError
-
-    def Save(self, path: str | Path, force: bool = True) -> bool:
-        raise NotImplementedError
-
-    def To_line(self) -> str:
-        raise NotImplementedError
-
-    def From_line(self, *line: str):
-        raise NotImplementedError
-
-    def Get_annotation(self) -> list[str]:
-        raise NotImplementedError
-
-
-@dataclass
-class Camera(Sensor, Pose):
-    img: ndarray | None = None
-    k_values: list[float] = field(
-        default_factory=lambda: [1., 1., 180., 120.]
-    )  # fx, fy, cx, cy
-
-    def Get_intrinsic(self):
-        """
-        Constructs the intrinsic 3x3 camera matrix from stored parameters
-
-        ------------------------------------------------------------------
-        ### Returns
-        - `INTRINSIC`: 3x3 intrinsic matrix
-
-        """
-        _in = eye(9)
-        _in[[0, 4, 2, 5]] = self.k_values
-        return _in.reshape(3, 3)
-
-    def Load(self, path: str | Path):
-        _path = path if isinstance(path, Path) else Path(path)
-        _file = _path / self.file_name
-
-        if _file.exists():
-            match _file.suffix:
-                case ".jpg" | ".png" | ".jpeg":
-                    self.img = cv2.imread(str(_file))
-                    return True
-                case ".npy":
-                    self.img = load(_file)
-                    return True
-
-        _cx, _cy = self.k_values[2:]
-        self.img = zeros(
-            shape=(round(_cy * 2), round(_cx * 2)), dtype=uint8
+        principal_rate: VEC_2 = field(
+            default_factory=lambda: np.ones((1, 2)) * 0.5
         )
-        return False
+        distortion: VEC_4 = field(default_factory=lambda: np.zeros((1, 4)))
+        img_size: IMG_SIZE = field(
+            default_factory=lambda: np.array([[480, 720]])
+        )
 
-    def Save(self, path: str | Path, force: bool = True):
-        _path = path if isinstance(path, Path) else Path(path)
-        _name = self.file_name
-        _img = self.img
+        def Get_intrinsic(self):
+            return Camera_Process.Compose_intrinsic(
+                Camera_Process.Get_focal_length_from(self.fov, self.img_size),
+                self.img_size
+            )
 
-        if _name and (_img is not None):
-            _file = _path / _name
+        def Set_parameter(self, intrinsic: INTRINSIC):
+            _f, _pp = Camera_Process.Extract_intrinsic(intrinsic)
+            _img_size = self.img_size
 
-            _save_dir = _file.parent
-            if _save_dir.exists() or force:
-                _save_dir.mkdir(exist_ok=True)
+            self.fov = Camera_Process.Get_fov_from(self.img_size, _f)
+            self.principal_rate = Camera_Process.Get_pp_rate_from(
+                _pp, _img_size)
 
-                _ext = _file.suffix if _file.suffix else ""
-                match _ext, force:
-                    case (".jpg" | ".jpeg" | ".png", _):
-                        cv2.imwrite(str(_file), _img)
-                        return True
-                    case (".npy", _):
-                        save(str(_file), _img)
-                        return True
-                    case(_, True):
-                        cv2.imwrite(str(_file.with_suffix(".png")), _img)
-                        return True
-        return False
+        def To_dict(self):
+            _param = np.concat(
+                [self.fov, self.principal_rate, self.distortion],
+                axis=1
+            )
+            return {
+                "parameter": _param.tolist(),
+                "image_size": self.img_size.tolist()
+            }
 
-    def To_line(self):
-        _rx, _tx = self.Get_pose_to_vector("quat")
-        _string = ",".join(map(str, self.k_values + r_[_rx, _tx].tolist()))
-        return f"{_string},{self.file_name}"
+        def Load(self, path: str | Path):
+            ...
 
-    def From_line(self, *line: str):
-        self.file_name = line[-1]
-        _data = [float(_v) for _v in line[:-1]]
+        def From_dict(self, **data: list):
+            _parma = np.array(data["parameter"])
 
-        self.k_values = _data[:4]
-        self.Set_pose_from_vector("quat", _data[4:8], _data[8:11])
+            self.fov = _parma[:, :2]
+            self.principal_rate = _parma[:, 2:4]
+            self.distortion = _parma[:, 4:]
 
-    def Get_annotation(self) -> list[str]:
-        return ["# [id, fx, fy, cx, cy, qw, qx, qy, qz, tx, ty, tz, source]"]
+            self.img_size = np.array(data["image_size"], dtype=np.int32)
+
+        def Save(self, path: str | Path):
+            ...
+
+    @dataclass
+    class Pose(Basement):
+        Q: QUAT = field(
+            default_factory=lambda: np.eye(1, 4)
+        )  # Quaternion rotation (qw, qx, qy, qz)
+        transfer: TF = field(default_factory=lambda: np.zeros((1, 3, 1)))
+        # Tx, Ty, Tz
+
+        # file_name: InitVar[str]
+        # image: np.ndarray | None = field(init=False)
+
+        def Push(
+            self,
+            quat: QUAT,
+            transfer: TF
+        ):
+            ...
+
+        def Get_transpose(self):
+            _q = self.Q
+            _tp: TP = np.tile(np.eye(4), [_q.shape[0], 1])
+            _tp[:, :3, :3] = Convert.Q_to_M(_q)
+            _tp[:, :3, 3] = self.transfer
+            return _tp
+
+        def Get_inv_transpose(self):
+            return inv(self.Get_transpose())
+
+        # def To_list(self, rx_type: Literal["euler", "rovec", "Q"] = "Q"):
+        #     _r_v, _t_v = self.Get_pose_to_vector(rx_type)
+
+        #     return ",".join([f"{_v:>.5f}" for _v in _r_v + _t_v])
+
+    @dataclass
+    class Image(Basement):
+        file_name: list[str | None] = field(default_factory=list)
+        img: IMG_1C_GROUP | IMG_3C_GROUP | None = None
+
+    @dataclass
+    class Points(Basement):
+        file_name: str | None = None
+
+        points: VEC_3 = field(
+            default_factory=lambda: np.empty((0, 3)))  # x, y, z
+        colors: PTS_COLOR = field(
+            default_factory=lambda: np.empty((0, 3), dtype=np.uint8))
+        # b, g, r
 
 
 @dataclass
-class Point_Cloud(Sensor):
-    points: ndarray = field(
-        default_factory=lambda: empty((0, 3)))  # x, y, z
-    colors: ndarray = field(
-        default_factory=lambda: empty((0, 3), dtype=uint8))  # b, g, r
+class Point_Cloud(Vision_Object):
+    points: VEC_3 = field(
+        default_factory=lambda: np.empty((0, 3)))  # x, y, z
+    colors: PTS_COLOR = field(
+        default_factory=lambda: np.empty((0, 3), dtype=np.uint8))  # b, g, r
 
-    def __Get_field_list__(self):
-        return [_c.name for _c in fields(self) if _c.name != "file_name"]
+    # def __Get_field_list__(self):
+    #     return [_c.name for _c in fields(self) if _c.name != "file_name"]
 
-    def __Decoding_Point_data__(self, path: Path):
-        _field_list = self.__Get_field_list__()
-        with load(path) as _f:
-            for _k, _d in _f.items():
-                if _k in _field_list:
-                    setattr(self, _k, _d)
+    # def __Decoding_Point_data__(self, path: Path):
+    #     _field_list = self.__Get_field_list__()
+    #     with load(path) as _f:
+    #         for _k, _d in _f.items():
+    #             if _k in _field_list:
+    #                 setattr(self, _k, _d)
 
-    def Load(self, path: str | Path) -> bool:
-        _path = path if isinstance(path, Path) else Path(path)
-        _file = _path / self.file_name
-
-        if _file.exists():
-            match _file.suffix:
-                case ".npz":
-                    self.__Decoding_Point_data__(_file)
-                    return True
-
-        return False
-
-    def __Encoding_Point_data__(
-        self, path: str | Path, is_compressed: bool = False
-    ):
-        _data = asdict(self)
-        _data.pop("file_name")
-        (savez_compressed if is_compressed else savez)(path, **_data)
-
-    def Save(self, path: str | Path, force: bool = True) -> bool:
-        _path = path if isinstance(path, Path) else Path(path)
-        _name = self.file_name
-        _pts = self.points
-
-        if _name and _pts.shape[0]:
-            _file = _path / _name
-
-            _save_dir = _file.parent
-            if _save_dir.exists() or force:
-                _save_dir.mkdir(exist_ok=True)
-
-                match _file.suffix, force:
-                    case (".npz", _):
-                        self.__Encoding_Point_data__(_file)
-                        return True
-        return False
-
-    def To_line(self) -> str:
+    def To_dict(self) -> str:
         # return f"{','.join(self.__Get_field_list__())},{self.file_name}"
         return f"{self.file_name}"
 
-    def From_line(self, *line: str):
+    def From_dict(self, line: list[str]):
         self.file_name = line[-1]
 
     def Get_annotation(self) -> list[str]:
         return ["# points (tx, ty, tz), colors (b, g, r), file_name"]
 
 
-SENSOR = TypeVar("SENSOR", bound=Sensor)
+# SENSOR = TypeVar("SENSOR", bound=Vision_Object)
 
 
-@dataclass
-class Scene_Sequence(Generic[SENSOR]):
-    load_source: InitVar[bool]
-    data_format: type[SENSOR]
+# @dataclass
+# class Scene_Sequence(Generic[SENSOR]):
+#     load_source: InitVar[bool]
+#     data_format: type[SENSOR]
 
-    meta_file: str = "test.json"
-    file_annotation: list[str] = field(default_factory=list)
-    source_path: str = str(Path.cwd() / "data")
+#     meta_file: str = "test.json"
+#     file_annotation: list[str] = field(default_factory=list)
+#     source_path: str = str(Path.cwd() / "data")
 
-    sequence_data: dict[int, SENSOR] = field(init=False)
+#     sequence_data: dict[int, SENSOR] = field(init=False)
 
-    def __post_init__(self, load_source: bool):
-        self.Load_data(load_source)
+#     def __post_init__(self, load_source: bool):
+#         self.Load_data(load_source)
 
-    def Save_data(self, save_source: bool = True, **kwarg) -> bool:
-        _file = Path(self.meta_file)  # meta file
-        # check the save directory for meta file
-        _file.parent.mkdir(exist_ok=True)
+#     def Save_data(self, save_source: bool = True, **kwarg) -> bool:
+#         _file = Path(self.meta_file)  # meta file
+#         # check the save directory for meta file
+#         _file.parent.mkdir(exist_ok=True)
 
-        # check the save source option
-        _path = Path(self.source_path)  # source_path
-        _save_source = save_source and _path.exists()
+#         # check the save source option
+#         _path = Path(self.source_path)  # source_path
+#         _save_source = save_source and _path.exists()
 
-        _sq_data = self.sequence_data
-        # check tha annotation that set in the meta file
-        _annotation = _sq_data[0].Get_annotation()
-        self.file_annotation = _annotation
+#         _sq_data = self.sequence_data
+#         # check tha annotation that set in the meta file
+#         _annotation = _sq_data[0].Get_annotation()
+#         self.file_annotation = _annotation
 
-        _meta_data = []
+#         _meta_data = []
 
-        for _id, _data in _sq_data.items():
-            if _save_source:
-                _data.Save(_path)
-            _meta_data.append(f"{_id},{_data.To_line(**kwarg)}")
+#         for _id, _data in _sq_data.items():
+#             if _save_source:
+#                 _data.Save(_path)
+#             _meta_data.append(f"{_id},{_data.To_dict(**kwarg)}")
 
-        _path.write_text("\n".join(_meta_data), encoding="UTF-8")
-        return True
+#         _path.write_text("\n".join(_meta_data), encoding="UTF-8")
+#         return True
 
-    def Load_data(self, load_source: bool = True) -> bool:
-        _file = Path(self.meta_file)  # meta file
-        _sq_data = {}
+#     def Load_data(self, load_source: bool = True) -> bool:
+#         _file = Path(self.meta_file)  # meta file
+#         _sq_data = {}
 
-        if not all([_file.exists(), _file.is_file(), _file.suffix == ".txt"]):
-            self.sequence_data = _sq_data
-            return False
+#         if not all(
+#           [_file.exists(), _file.is_file(), _file.suffix == ".txt"]):
+#             self.sequence_data = _sq_data
+#             return False
 
-        _path = Path(self.source_path)  # source_path
-        _load_source = load_source and _path.exists()
+#         _path = Path(self.source_path)  # source_path
+#         _load_source = load_source and _path.exists()
 
-        _st = len(self.file_annotation)
-        _data_format = self.data_format
+#         _st = len(self.file_annotation)
+#         _data_format = self.data_format
 
-        for _line in _file.read_text(encoding="UTF-8").split("\n")[_st:]:
-            _data = _line.split(",")
-            _sq = _data_format()
-            _sq.From_line(*_data[1:])
+#         for _line in _file.read_text(encoding="UTF-8").split("\n")[_st:]:
+#             _data = _line.split(",")
+#             _sq = _data_format()
+#             _sq.From_dict(*_data[1:])
 
-            if _load_source:
-                _sq.Load(_path)
-            _sq_data[int(_data[0])] = _sq
+#             if _load_source:
+#                 _sq.Load(_path)
+#             _sq_data[int(_data[0])] = _sq
 
-        self.sequence_data = _sq_data
-        return True
+#         self.sequence_data = _sq_data
+#         return True
 
-    def Get_config(self):
-        return {
-            "data_format": self.data_format.__name__.lower(),
-            "meta_file": self.meta_file,
-            "file_annotation": self.file_annotation,
-            "path": self.source_path,
-        }
+#     def Get_config(self):
+#         return {
+#             "data_format": self.data_format.__name__.lower(),
+#             "meta_file": self.meta_file,
+#             "file_annotation": self.file_annotation,
+#             "path": self.source_path,
+#         }
