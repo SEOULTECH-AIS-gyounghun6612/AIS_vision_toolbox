@@ -147,15 +147,18 @@ class Camera_Process():
         _w, _h = depth_map_size
         pts[:, :2] /= pts[:, 2][:, None]
 
-        _u = np.round(pts[:, 0]).astype(np.int32)
-        _v = np.round(pts[:, 1]).astype(np.int32)
+        _u = np.round(pts[:, 0])
+        _v = np.round(pts[:, 1])
         _mask = (
             (_u >= 0) * (_u < _w) & (_v >= 0) & (_v < _h) & (pts[:, 2] > 0))
+        
+        _u = _u[_mask].astype(np.int32)
+        _v = _v[_mask].astype(np.int32)
 
         _d_flat = np.full(_h * _w, np.inf, dtype=np.float32)
         np.minimum.at(
             _d_flat,
-            (_v[_mask] * _w +  _u[_mask]).astype(np.int32),
+            (_v * _w +  _u).astype(np.int32),
             pts[_mask, 2]
         )
         _d_flat = np.nan_to_num(_d_flat, nan=0.0, posinf=0.0, neginf=0.0)
