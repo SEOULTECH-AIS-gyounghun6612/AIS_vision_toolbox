@@ -87,6 +87,18 @@ class Vision_Object():
             self.principal_rate = Camera_Process.Get_pp_rate_from(
                 _pp, _img_size)
 
+        def Push(
+            self,
+            fov: tuple[float, float],
+            principal_rate: tuple[float, float],
+            distortion: tuple[float, float, float, float],
+            img_size: tuple[int, int]
+        ):
+            self.fov = np.r_[self.fov, [fov]]
+            self.principal_rate = np.r_[self.principal_rate, [principal_rate]]
+            self.distortion = np.r_[self.distortion, [distortion]]
+            self.img_size = np.r_[self.img_size, [img_size]]
+
         def To_dict(self):
             _param = np.concat(
                 [self.fov, self.principal_rate, self.distortion],
@@ -132,7 +144,7 @@ class Vision_Object():
 
         def Get_transpose(self):
             _q = self.Q
-            _tp: TP = np.tile(np.eye(4), [_q.shape[0], 1])
+            _tp: TP = np.tile(np.eye(4), [_q.shape[0], 1, 1])
             _tp[:, :3, :3] = Convert.Q_to_M(_q)
             _tp[:, :3, 3] = self.transfer
             return _tp
