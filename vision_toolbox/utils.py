@@ -10,36 +10,7 @@ import cv2
 from python_ex.system  import String
 
 
-QUAT = Annotated[NDArray, (None, 4)]
 RT = Annotated[NDArray, (None, 3, 3)]
-
-
-class Convert():
-    @staticmethod
-    def M_to_Q(matrix: np.ndarray) -> QUAT:
-        return R.from_matrix(matrix).as_quat(scalar_first=True)
-
-    @staticmethod
-    def Q_to_M(quat: np.ndarray) -> RT:
-        return R.from_quat(quat, scalar_first=True).as_matrix()
-
-    @staticmethod
-    def M_2_Rv(matrix: np.ndarray) -> np.ndarray:
-        return R.from_matrix(matrix).as_rotvec(degrees=True)
-
-    @staticmethod
-    def Rv_2_M(rotvec: np.ndarray) -> RT:
-        return R.from_rotvec(rotvec, degrees=True).as_matrix()
-
-    # @staticmethod
-    # def Remove_duplicate(pts: ndarray, precision: int):
-    #     _scale: int = 10 ** precision
-    #     _scaled = (pts * _scale).round().astype(int64)  # 정수형 변환
-    #     _, _indices = unique(_scaled, axis=0, return_index=True)
-
-    #     return pts[_indices], _indices
-
-
 TF = Annotated[NDArray, (None, 3, 1)]
 TP = Annotated[NDArray, (None, 4, 4)]
 INTRINSIC = Annotated[NDArray, (None, 3, 3)]
@@ -48,7 +19,7 @@ VEC_2 = Annotated[NDArray, (None, 2)]
 VEC_3 = Annotated[NDArray, (None, 3)]
 VEC_4 = Annotated[NDArray, (None, 4)]
 
-IMG_SIZE = Annotated[NDArray[np.int32], (None, 2)]
+IMGs_SIZE = Annotated[NDArray[np.int32], (None, 2)]
 PTS_COLOR = Annotated[NDArray[np.uint8], (None, 3)]
 
 IMG_1C_GROUP = Annotated[NDArray, (None, None, None, 1)]
@@ -58,31 +29,97 @@ IMG_1C = Annotated[NDArray, (None, None, 1)]
 IMG_3C = Annotated[NDArray, (None, None, 3)]
 
 
+class Convert():
+    """ ### 회전 변환 관련 기능을 제공하는 클래스
+
+    행렬, 쿼터니언, 회전 벡터 간의 변환을 수행
+
+    ---------------------------------------------------------------------------
+    ### Structure
+    - M_to_Q: 회전 행렬 → 쿼터니언 변환
+    - Q_to_M: 쿼터니언 → 회전 행렬 변환
+    - M_2_Rv: 회전 행렬 → 로드리게스 회전 벡터 변환
+    - Rv_2_M: 로드리게스 회전 벡터 → 회전 행렬 변환
+    """
+
+    @staticmethod
+    def M_to_Q(matrix: RT) -> VEC_4:
+        """ ### 회전 행렬을 쿼터니언으로 변환
+
+        ------------------------------------------------------------------
+        ### Args
+        - matrix: n개 3x3 회전 행렬 -> [n, 3, 3] 
+
+        ### Returns
+        - VEC_4: scalar-first 쿼터니언 (qw, qx, qy, qz) -> [n, 4]
+        """
+        return R.from_matrix(matrix).as_quat(scalar_first=True)
+
+    @staticmethod
+    def Q_to_M(quat: VEC_4) -> RT:
+        """ ### 쿼터니언을 회전 행렬로 변환
+
+        ------------------------------------------------------------------
+        ### Args
+        - quat: scalar-first 쿼터니언 (qw, qx, qy, qz) -> [n, 4]
+
+        ### Returns
+        - RT: n개 3x3 회전 행렬 -> [n, 3, 3] 
+        """
+        return R.from_quat(quat, scalar_first=True).as_matrix()
+
+    @staticmethod
+    def M_2_Rv(matrix: RT) -> VEC_3:
+        """ ### 회전 행렬을 로드리게스 회전 벡터로 변환
+
+        ------------------------------------------------------------------
+        ### Args
+        - matrix: n개 3x3 회전 행렬 -> [n, 3, 3] 
+
+        ### Returns
+        - VEC_3: degree 단위 로드리게스 회전 벡터 -> [n, 3] 
+        """
+        return R.from_matrix(matrix).as_rotvec(degrees=True)
+
+    @staticmethod
+    def Rv_2_M(rotvec: VEC_3) -> RT:
+        """ ### 회전 벡터를 로드리게스 회전 행렬로 변환
+
+        ------------------------------------------------------------------
+        ### Args
+        - rotvec: degree 단위 로드리게스 회전 벡터 -> [n, 3] 
+
+        ### Returns
+        - RT: n개 3x3 회전 행렬 -> [n, 3, 3] 
+        """
+        return R.from_rotvec(rotvec, degrees=True).as_matrix()
+
+
 class Camera_Process():
     # about parameter
     @staticmethod
-    def Get_focal_length_from(fov: VEC_2, size: VEC_2):
+    def Get_focal_length_from(fov: VEC_2, size: IMGs_SIZE) -> VEC_2:
         return size / (2 * np.tan(fov / 2))
 
     @staticmethod
-    def Get_size_from(fov: np.ndarray, f_length: np.ndarray):
+    def Get_size_from(fov: VEC_2, f_length: VEC_2) -> IMGs_SIZE:
         return 2 * np.round(np.tan(fov / 2) * f_length).astype(int)
 
     @staticmethod
-    def Get_fov_from(size: np.ndarray, f_length: np.ndarray):
+    def Get_fov_from(size: IMGs_SIZE, f_length: VEC_2) -> VEC_2:
         return 2 * np.arctan2(size / 2, f_length)
 
     @staticmethod
-    def Get_pp_from(rate: np.ndarray, size: np.ndarray):
+    def Get_pp_from(rate: VEC_2, size: IMGs_SIZE) -> VEC_2:
         return size * rate
 
     @staticmethod
-    def Get_pp_rate_from(pp: np.ndarray, size: np.ndarray):
+    def Get_pp_rate_from(pp: VEC_2, size: IMGs_SIZE) -> VEC_2:
         return pp / size
 
     # about intrinsic
     @staticmethod
-    def Compose_intrinsic(f_length: np.ndarray, pp: np.ndarray):
+    def Compose_intrinsic(f_length: VEC_2, pp: VEC_2) -> INTRINSIC:
         if f_length.ndim != pp.ndim or f_length.shape[0] != pp.shape[0]:
             raise ValueError
 
@@ -99,7 +136,7 @@ class Camera_Process():
         return _in
 
     @staticmethod
-    def Extract_intrinsic(intrinsic: INTRINSIC):
+    def Extract_intrinsic(intrinsic: INTRINSIC) -> tuple[VEC_2, VEC_2]:
         if intrinsic.ndim >= 3:
             _param = intrinsic[:, [0, 1, 0, 1], [0, 1, 2, 2]]
             return _param[:, :2], _param[:, 2:]
@@ -109,7 +146,7 @@ class Camera_Process():
 
     @staticmethod
     def Adjust_intrinsic(
-        intrinsic: INTRINSIC, size: IMG_SIZE, new_size: IMG_SIZE
+        intrinsic: INTRINSIC, size: IMGs_SIZE, new_size: IMGs_SIZE
     ) -> INTRINSIC:
         _ff, _pp = Camera_Process.Extract_intrinsic(intrinsic)
         _fov = Camera_Process.Get_fov_from(size, _ff)

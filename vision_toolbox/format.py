@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 from numpy.linalg import inv
 
 from vision_toolbox.utils import (
-    QUAT, TF, TP, INTRINSIC, VEC_2, VEC_3, VEC_4, IMG_SIZE, PTS_COLOR,
+    TF, TP, INTRINSIC, VEC_2, VEC_3, VEC_4, IMGs_SIZE, PTS_COLOR,
     IMG_1C_GROUP, IMG_3C_GROUP,
     Camera_Process, Convert
 )
@@ -69,7 +69,7 @@ class Vision_Object():
             default_factory=lambda: np.ones((1, 2)) * 0.5
         )
         distortion: VEC_4 = field(default_factory=lambda: np.zeros((1, 4)))
-        img_size: IMG_SIZE = field(
+        img_size: IMGs_SIZE = field(
             default_factory=lambda: np.array([[480, 720]])
         )
 
@@ -126,7 +126,7 @@ class Vision_Object():
 
     @dataclass
     class Pose(Basement):
-        Q: QUAT = field(
+        Q: VEC_4 = field(
             default_factory=lambda: np.eye(1, 4)
         )  # Quaternion rotation (qw, qx, qy, qz)
         transfer: TF = field(default_factory=lambda: np.zeros((1, 3, 1)))
@@ -135,11 +135,7 @@ class Vision_Object():
         # file_name: InitVar[str]
         # image: np.ndarray | None = field(init=False)
 
-        def Push(
-            self,
-            quat: QUAT,
-            transfer: TF
-        ):
+        def Push( self, quat: VEC_4, transfer: TF ):
             ...
 
         def Get_transpose(self):
