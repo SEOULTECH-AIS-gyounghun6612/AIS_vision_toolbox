@@ -285,7 +285,7 @@ class Image_Process():
         unit: int = 14, by_width: bool = True
     ) -> IMG_1C | IMG_3C:
         _size, _pad_gap = Image_Process.Get_new_shape(
-            image.shape[:2:-1], ref, unit, by_width, mode == "pad"
+            image.shape[-2::-1], ref, unit, by_width, mode == "pad"
         )
 
         return Image_Process.Resize_img_with_gap(
