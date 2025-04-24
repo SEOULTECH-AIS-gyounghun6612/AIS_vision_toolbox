@@ -7,7 +7,7 @@ from scipy.spatial.transform import Rotation as R
 
 import cv2
 
-from python_ex.system import String
+from python_ex.system  import String
 
 
 QUAT = Annotated[NDArray, (None, 4)]
@@ -210,16 +210,16 @@ class Image_Process():
         is_width: bool = True, filling: int | float = 0
     ) -> np.ndarray:
         # if mode is crop_* -> gap is negative
-        if mode == Image_Process.CROP.CROP_N:
+        if mode == "crop_n":
             return img[:, :gap] if is_width else img[:gap, :]
-        if mode == Image_Process.CROP.CROP_F:
+        if mode == "crop_f":
             return img[:, -gap:] if is_width else img[-gap:, :]
 
         _gap = -gap if gap < 0 else gap
         _st = _gap // 2
         _ed = _gap - _st
 
-        if mode == Image_Process.CROP.CROP_C:
+        if mode == "crop_c":
             return img[:, _st:-_ed] if is_width else img[_st:-_ed, :]
 
         if is_width:
@@ -247,9 +247,8 @@ class Image_Process():
         ref: int = 518,
         unit: int = 14, by_width: bool = True
     ) -> IMG_1C | IMG_3C:
-        _use_pad = mode == Image_Process.CROP.PAD
         _size, _pad_gap = Image_Process.Get_new_shape(
-            image.shape[:2:-1], ref, unit, by_width, _use_pad
+            image.shape[:2:-1], ref, unit, by_width, mode == "pad"
         )
 
         return Image_Process.Resize_img_with_gap(
