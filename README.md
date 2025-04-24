@@ -16,6 +16,14 @@
 
   - [ ] 공간상에서 특정 시점을 표현하는 기본 구조 클래스인 Scene 클래스 추가
 
+### utils.py
+
+- [ ] 데이터 특성 별 처리 코드 정리
+  - [ ] Convert: 회전 방법 변환
+  - [ ] Camera_Process
+  - [ ] Image_Process
+  - [ ] Space_process
+
 ## 🔧 Installation
 
 ### 📚 Requirements
