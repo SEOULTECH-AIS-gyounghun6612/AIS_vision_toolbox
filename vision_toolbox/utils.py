@@ -182,12 +182,13 @@ class Camera_Process():
         pts: VEC_3, depth_map_size: tuple[int, int]
     ) -> IMG_1C:
         _w, _h = depth_map_size
-        pts[:, :2] /= pts[:, 2][:, None]
+        _vis_pts = pts[pts[:, 2] > 0]
+        _vis_pts[:, :2] /= _vis_pts[:, 2][:, None]
 
-        _u = np.round(pts[:, 0])
-        _v = np.round(pts[:, 1])
+        _u = np.round(_vis_pts[:, 0])
+        _v = np.round(_vis_pts[:, 1])
         _mask = (
-            (_u >= 0) * (_u < _w) & (_v >= 0) & (_v < _h) & (pts[:, 2] > 0))
+            (_u >= 0) * (_u < _w) & (_v >= 0) & (_v < _h))
         
         _u = _u[_mask].astype(np.int32)
         _v = _v[_mask].astype(np.int32)
@@ -196,7 +197,7 @@ class Camera_Process():
         np.minimum.at(
             _d_flat,
             (_v * _w +  _u).astype(np.int32),
-            pts[_mask, 2]
+            _vis_pts[_mask, 2]
         )
         _d_flat = np.nan_to_num(_d_flat, nan=0.0, posinf=0.0, neginf=0.0)
         _d_flat[_d_flat < 0] = 0.0
@@ -206,17 +207,21 @@ class Camera_Process():
     def Remapping_depth_map(
         depth: IMG_1C,
         intrinsic: Annotated[NDArray, (3, 3)],
-        new_intrinsic: Annotated[NDArray, (3, 3)],
         new_size: tuple[int, int]
     ):
+        _h, _w = depth.shape[:2]
+        _new_in = Camera_Process.Adjust_intrinsic(
+            intrinsic, [_w, _h], new_size )
+
         _pts_om_img = Camera_Process.Get_pts_from(depth)
         _pts_on_cam = Camera_Process.Apply_intrinsic(
             _pts_om_img, intrinsic, True)
 
         return Camera_Process.Get_depth_map_from(
-            Camera_Process.Apply_intrinsic(_pts_on_cam, new_intrinsic),
+            Camera_Process.Apply_intrinsic(_pts_on_cam, _new_in),
             new_size
         )
+
 
 
 class Image_Process():
