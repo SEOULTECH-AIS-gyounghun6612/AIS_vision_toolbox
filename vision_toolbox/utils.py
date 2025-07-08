@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Literal
 
 from enum import auto
 import numpy as np
@@ -28,71 +28,84 @@ IMG_3C_GROUP = Annotated[NDArray, (None, None, None, 3)]
 IMG_1C = Annotated[NDArray, (None, None, 1)]
 IMG_3C = Annotated[NDArray, (None, None, 3)]
 
+L2R = np.array([
+    [0.0, 1.0, 0.0, 0.0],
+    [1.0, 0.0, 0.0, 0.0],
+    [-0.0, -0.0, -1.0, -0.0],
+    [0.0, 0.0, 0.0, 1.0]
+])
 
 class Convert():
-    """ ### 회전 변환 관련 기능을 제공하는 클래스
+    class Rotation():
+        """ ### 회전 변환 관련 기능을 제공하는 클래스
 
-    행렬, 쿼터니언, 회전 벡터 간의 변환을 수행
+        행렬, 쿼터니언, 회전 벡터 간의 변환을 수행
 
-    ---------------------------------------------------------------------------
-    ### Structure
-    - M_to_Q: 회전 행렬 → 쿼터니언 변환
-    - Q_to_M: 쿼터니언 → 회전 행렬 변환
-    - M_2_Rv: 회전 행렬 → 로드리게스 회전 벡터 변환
-    - Rv_2_M: 로드리게스 회전 벡터 → 회전 행렬 변환
-    """
+        ---------------------------------------------------------------------------
+        ### Structure
+        - M_to_Q: 회전 행렬 → 쿼터니언 변환
+        - Q_to_M: 쿼터니언 → 회전 행렬 변환
+        - M_2_Rv: 회전 행렬 → 로드리게스 회전 벡터 변환
+        - Rv_2_M: 로드리게스 회전 벡터 → 회전 행렬 변환
+        """
+
+        @staticmethod
+        def M_to_Q(matrix: RT) -> VEC_4:
+            """ ### 회전 행렬을 쿼터니언으로 변환
+
+            ------------------------------------------------------------------
+            ### Args
+            - matrix: n개 3x3 회전 행렬 -> [n, 3, 3] 
+
+            ### Returns
+            - VEC_4: scalar-first 쿼터니언 (qw, qx, qy, qz) -> [n, 4]
+            """
+            return R.from_matrix(matrix).as_quat(scalar_first=True)
+
+        @staticmethod
+        def Q_to_M(quat: VEC_4) -> RT:
+            """ ### 쿼터니언을 회전 행렬로 변환
+
+            ------------------------------------------------------------------
+            ### Args
+            - quat: scalar-first 쿼터니언 (qw, qx, qy, qz) -> [n, 4]
+
+            ### Returns
+            - RT: n개 3x3 회전 행렬 -> [n, 3, 3] 
+            """
+            return R.from_quat(quat, scalar_first=True).as_matrix()
+
+        @staticmethod
+        def M_2_Rv(matrix: RT) -> VEC_3:
+            """ ### 회전 행렬을 로드리게스 회전 벡터로 변환
+
+            ------------------------------------------------------------------
+            ### Args
+            - matrix: n개 3x3 회전 행렬 -> [n, 3, 3] 
+
+            ### Returns
+            - VEC_3: degree 단위 로드리게스 회전 벡터 -> [n, 3] 
+            """
+            return R.from_matrix(matrix).as_rotvec(degrees=True)
+
+        @staticmethod
+        def Rv_2_M(rotvec: VEC_3) -> RT:
+            """ ### 회전 벡터를 로드리게스 회전 행렬로 변환
+
+            ------------------------------------------------------------------
+            ### Args
+            - rotvec: degree 단위 로드리게스 회전 벡터 -> [n, 3] 
+
+            ### Returns
+            - RT: n개 3x3 회전 행렬 -> [n, 3, 3] 
+            """
+            return R.from_rotvec(rotvec, degrees=True).as_matrix()
 
     @staticmethod
-    def M_to_Q(matrix: RT) -> VEC_4:
-        """ ### 회전 행렬을 쿼터니언으로 변환
-
-        ------------------------------------------------------------------
-        ### Args
-        - matrix: n개 3x3 회전 행렬 -> [n, 3, 3] 
-
-        ### Returns
-        - VEC_4: scalar-first 쿼터니언 (qw, qx, qy, qz) -> [n, 4]
-        """
-        return R.from_matrix(matrix).as_quat(scalar_first=True)
-
-    @staticmethod
-    def Q_to_M(quat: VEC_4) -> RT:
-        """ ### 쿼터니언을 회전 행렬로 변환
-
-        ------------------------------------------------------------------
-        ### Args
-        - quat: scalar-first 쿼터니언 (qw, qx, qy, qz) -> [n, 4]
-
-        ### Returns
-        - RT: n개 3x3 회전 행렬 -> [n, 3, 3] 
-        """
-        return R.from_quat(quat, scalar_first=True).as_matrix()
-
-    @staticmethod
-    def M_2_Rv(matrix: RT) -> VEC_3:
-        """ ### 회전 행렬을 로드리게스 회전 벡터로 변환
-
-        ------------------------------------------------------------------
-        ### Args
-        - matrix: n개 3x3 회전 행렬 -> [n, 3, 3] 
-
-        ### Returns
-        - VEC_3: degree 단위 로드리게스 회전 벡터 -> [n, 3] 
-        """
-        return R.from_matrix(matrix).as_rotvec(degrees=True)
-
-    @staticmethod
-    def Rv_2_M(rotvec: VEC_3) -> RT:
-        """ ### 회전 벡터를 로드리게스 회전 행렬로 변환
-
-        ------------------------------------------------------------------
-        ### Args
-        - rotvec: degree 단위 로드리게스 회전 벡터 -> [n, 3] 
-
-        ### Returns
-        - RT: n개 3x3 회전 행렬 -> [n, 3, 3] 
-        """
-        return R.from_rotvec(rotvec, degrees=True).as_matrix()
+    def To_homog(obj: VEC_2 | VEC_3):
+        return np.c_[
+            obj, np.ones((obj.shape[0], 1), dtype=obj.dtype)
+        ]
 
 
 class Camera_Process():
@@ -211,7 +224,10 @@ class Camera_Process():
     ):
         _h, _w = depth.shape[:2]
         _new_in = Camera_Process.Adjust_intrinsic(
-            intrinsic, [_w, _h], new_size )
+            intrinsic,
+            [_w, _h],
+            new_size
+        )
 
         _pts_om_img = Camera_Process.Get_pts_from(depth)
         _pts_on_cam = Camera_Process.Apply_intrinsic(
@@ -221,7 +237,6 @@ class Camera_Process():
             Camera_Process.Apply_intrinsic(_pts_on_cam, _new_in),
             new_size
         )
-
 
 
 class Image_Process():
@@ -320,19 +335,36 @@ class Image_Process():
         _colored_d = cv2.applyColorMap(_img, cmap)
 
         if not visualize_ground:
-            _colored_d[_img == 0] = [0, 0, 0]
+            _colored_d[_img[..., 0] == 0] = [0, 0, 0]
 
         return _colored_d
 
 
 class Space_process():
+    @staticmethod
+    def Hand_change(
+        obj: VEC_3 | VEC_4 | TP, mode: Literal["L2R", "R2L"] = "L2R"
+    ):
+        assert mode == "L2R", print("mode: R2L is not yet" )
+        _tp = L2R if mode == "L2R" else np.eye(4)
+
+        _ndim = obj.ndim
+        if _ndim == 2:  #  VEC_3 or VEC_4
+            _ord = obj.shape[1]
+            _pts: VEC_4 = Convert.To_homog(obj) if _ord == 3 else obj
+            
+            return Space_process.Apply_extrinsic(
+                _pts, _tp[None, :, :])[0, :, :3]
+
+        return _tp @ obj
+
     # about extrinsic
     @staticmethod
     def Compose_extrinsic(q: np.ndarray, tf: np.ndarray):
         if (q.ndim != tf.ndim) or (q.ndim >= 2 and q.shape[0] != tf.shape[0]):
             raise ValueError
 
-        _m = Convert.Q_to_M(q)
+        _m = Convert.Rotation.Q_to_M(q)
 
         if q.ndim >= 2:
             _ex = np.tile(np.eye(4), [q.shape[0], 1, 1])
@@ -349,11 +381,11 @@ class Space_process():
     @staticmethod
     def Extract_extrinsic(extrinsic: np.ndarray):
         if extrinsic.ndim >= 3:
-            _q = Convert.M_to_Q(extrinsic[:, :3, :3])
+            _q = Convert.Rotation.M_to_Q(extrinsic[:, :3, :3])
             _tr = extrinsic[:, :3, 3]
 
         else:
-            _q = Convert.M_to_Q(extrinsic[:3, :3])
+            _q = Convert.Rotation.M_to_Q(extrinsic[:3, :3])
             _tr = extrinsic[:3, 3]
 
         return _q, _tr
@@ -367,8 +399,8 @@ class Space_process():
         _tp: TP = np.matmul(to_tp, np.linalg.inv(from_tp))
         _tr = np.eye(4)
 
-        _tr[:3, :3] = Convert.Rv_2_M(
-            Convert.M_2_Rv(_tp[:, :3, :3]).mean(axis=0))
+        _tr[:3, :3] = Convert.Rotation.Rv_2_M(
+            Convert.Rotation.M_2_Rv(_tp[:, :3, :3]).mean(axis=0))
         _tr[:3, 3] = _tp[:, :3, 3].mean(axis=0)
 
         return _tr
@@ -376,15 +408,15 @@ class Space_process():
     # apply_transpose
     @staticmethod
     def Apply_extrinsic(
-        pts: VEC_3 | VEC_4, extrinsic: Annotated[NDArray, (3, 4)],
-        apply_inv: bool = False
+        pts: VEC_3 | VEC_4, extrinsic: TP, apply_inv: bool = False
     ) -> VEC_3:
-        _pts: Annotated[NDArray, (4, None)] = np.c_[
-            pts, np.ones((pts.shape[0], 1), dtype=pts.dtype)
-        ].T if pts.shape[1] == 3 else pts.T
-
         _ex = np.linalg.inv(extrinsic) if apply_inv else extrinsic
-        return (_ex[:3, :] @ _pts).T
+        _ex = _ex[:, :3, :]
+
+        _ord = pts.shape[1]
+        _pts: VEC_4 = Convert.To_homog(pts) if _ord == 3 else pts
+
+        return np.einsum("bjk, nk -> bnk", _ex, _pts)
 
     @staticmethod
     def Remove_duplicate(
