@@ -151,7 +151,7 @@ class Gaussian_3DGS(Asset):
     # 3DGS의 SH(Spherical Harmonics) 계수 또는 일반 RGB 값으로 활용 가능.
     # SH features는 (N, sh_degree**2, 3) 이지만, 편의상 2D로 저장/로드
     # 예: SH degree 3 (16) * 3 channels = 48
-    color_feature: NDArray = field(
+    colors: NDArray = field(
         default_factory=lambda: np.empty((0, 48), dtype=np.float32),
         repr=False
     )
@@ -170,7 +170,7 @@ class Gaussian_3DGS(Asset):
             self.opacities = data['opacities']
             self.scales = data['scales']
             self.rotations = data['rotations']
-            self.color_feature = data['color_feature']
+            self.colors = data['colors']
 
     def Save_data(self, data_path: Path):
         """3DGS 파라미터를 npz 파일로 저장."""
@@ -183,7 +183,7 @@ class Gaussian_3DGS(Asset):
                 opacities=self.opacities,
                 scales=self.scales,
                 rotations=self.rotations,
-                color_feature=self.color_feature
+                colors=self.colors
             )
 
 
