@@ -249,11 +249,10 @@ class Gaussian_3D(Asset):
         # PLY 엘리먼트의 데이터 타입 정의
         _dtype_list = [
             ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
-            ('nx', 'f4'), ('ny', 'f4'), ('nz', 'f4'),
-            ('f_dc_0', 'f4'), ('f_dc_1', 'f4'), ('f_dc_2', 'f4'),
-            ('opacity', 'f4'),
+            ('rot_0', 'f4'), ('rot_1', 'f4'), ('rot_2', 'f4'), ('rot_3', 'f4'),
             ('scale_0', 'f4'), ('scale_1', 'f4'), ('scale_2', 'f4'),
-            ('rot_0', 'f4'), ('rot_1', 'f4'), ('rot_2', 'f4'), ('rot_3', 'f4')
+            ('opacity', 'f4'),
+            ('f_dc_0', 'f4'), ('f_dc_1', 'f4'), ('f_dc_2', 'f4')
         ]
 
         # SH AC(고차항) 이름 동적 추가
@@ -265,12 +264,11 @@ class Gaussian_3D(Asset):
         # 속성 배열을 순서에 맞게 하나로 합침
         attrs = np.concatenate(
             (
-                _pts, np.zeros_like(_pts),
-                _clrs[:, :3],
-                _opcts,
-                _scls,
+                _pts,
                 _rots,
-                _clrs[:, 3:]
+                _scls,
+                _opcts,
+                _clrs
             ),
             axis=1
         )
