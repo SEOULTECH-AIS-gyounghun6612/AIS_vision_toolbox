@@ -16,12 +16,12 @@ class Convert:
     @staticmethod
     def From_matrix_to_quat(mat: ROT_M) -> VEC_4D:
         """회전 행렬 -> 쿼터니언."""
-        return R.from_matrix(mat).as_quat(scalar_first=True)
+        return R.from_matrix(mat).as_quat()
 
     @staticmethod
     def From_quat_to_matrix(quat: VEC_4D) -> ROT_M:
         """쿼터니언 -> 회전 행렬."""
-        return R.from_quat(quat, scalar_first=True).as_matrix()
+        return R.from_quat(quat).as_matrix()
 
     @staticmethod
     def From_matrix_to_rotvec(mat: ROT_M) -> VEC_3D:
