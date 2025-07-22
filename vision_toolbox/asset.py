@@ -166,29 +166,29 @@ class Gaussian_3D(Asset):
         return cls(relative_path=data["relative_path"])
 
     # --- 데이터 처리 로직 ---
-    def __Convert_to_weight(self, display_data: dict[str, NDArray]):
+    def __Convert_to_weight(self, dp_data: dict[str, NDArray]):
         """디스플레이용 데이터를 학습용 가중치(원본 파라미터)로 변환하여 객체에 저장."""
-        self.points = display_data['points']
-        self.rotations = display_data['rotations']
-        self.colors = display_data['colors']
+        self.points = dp_data['points']
+        self.rotations = dp_data['rotations']
+        self.colors = dp_data['colors']
 
-        # Logit (Sigmoid의 역연산)
         _ep = 1e-10
-        _op_clamped = np.clip(display_data['opacities'], _ep, 1 - _ep)
-        self.opacities = -np.log(1 / _op_clamped - 1)
+        _op_clamped = np.clip(dp_data['opacities'], _ep, 1 - _ep)
+        self.opacities = -np.log(1 / _op_clamped - 1)  # Logit
+        self.scales = np.log(dp_data['scales']) # Log
 
-        # Log (Exp의 역연산)
-        self.scales = np.log(display_data['scales'])
-
-    def __Ready_to_display(self) -> dict[str, NDArray]:
-        """객체의 학습용 가중치를 디스플레이용 최종 값으로 변환."""
+    def __Ready_to_display_dict(self) -> dict[str, NDArray]:
         return {
             "points": self.points,
-            "opacities": 1 / (1 + np.exp(-self.opacities)),  # Sigmoid
-            "scales": np.exp(self.scales),  # Exp
             "rotations": self.rotations,
+            "scales": np.exp(self.scales),  # Exp
+            "opacities": 1 / (1 + np.exp(-self.opacities)),  # Sigmoid
             "colors": self.colors
         }
+
+    def Ready_to_display_flat(self) -> np.ndarray:
+        _attr = self.__Ready_to_display_dict()
+        return np.concatenate(list(_attr.values()), axis=1)
 
     # --- 파일 포맷별 순수 I/O 함수 ---
     def __Load_from_npz(self, file_path: Path) -> dict[str, NDArray]:
@@ -239,15 +239,8 @@ class Gaussian_3D(Asset):
         }
 
     def __Save_to_ply(self, file_path: Path, data: dict[str, NDArray]):
-        """주어진 디스플레이용 데이터를 PLY 파일로 저장."""
-        _pts, _opcts, _scls, _rots, _clrs = (
-            data["points"], data["opacities"], data["scales"],
-            data["rotations"], data["colors"]
-        )
-        _n_pts = _pts.shape[0]
-
         # PLY 엘리먼트의 데이터 타입 정의
-        _dtype_list = [
+        _d_list = [
             ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
             ('rot_0', 'f4'), ('rot_1', 'f4'), ('rot_2', 'f4'), ('rot_3', 'f4'),
             ('scale_0', 'f4'), ('scale_1', 'f4'), ('scale_2', 'f4'),
@@ -256,25 +249,12 @@ class Gaussian_3D(Asset):
         ]
 
         # SH AC(고차항) 이름 동적 추가
-        for i in range(_clrs.shape[1] - 3):
-            _dtype_list.append((f'f_rest_{i}', 'f4'))
+        for i in range(data["colors"].shape[1] - 3):
+            _d_list.append((f'f_rest_{i}', 'f4'))
 
-        _ele = np.empty(_n_pts, dtype=_dtype_list)
-
-        # 속성 배열을 순서에 맞게 하나로 합침
-        attrs = np.concatenate(
-            (
-                _pts,
-                _rots,
-                _scls,
-                _opcts,
-                _clrs
-            ),
-            axis=1
-        )
-
-        _ele[:] = [tuple(row) for row in attrs]
-        PlyData([PlyElement.describe(_ele, 'vertex')]).write(file_path)
+        _attrs = np.concatenate(list(data.values()), axis=1)
+        _st_attrs = _attrs.astype(np.float32).view(np.dtype(_d_list)).squeeze()
+        PlyData([PlyElement.describe(_st_attrs, 'vertex')]).write(file_path)
 
     # --- 메인 데이터 입출력 컨트롤러 ---
     def Load_data(self, data_path: Path):
@@ -300,7 +280,7 @@ class Gaussian_3D(Asset):
         _f_path.parent.mkdir(exist_ok=True, parents=True)
         _ext = _f_path.suffix
 
-        _dp_data = self.__Ready_to_display()
+        _dp_data = self.__Ready_to_display_dict()
 
         if _ext == ".npz":
             self.__Save_to_npz(_f_path, _dp_data)
