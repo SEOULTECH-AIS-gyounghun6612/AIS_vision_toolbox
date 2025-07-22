@@ -10,6 +10,8 @@ from abc import ABC, abstractmethod
 import numpy as np
 from numpy.typing import NDArray
 
+from plyfile import PlyData, PlyElement
+
 import cv2
 
 from .utils.vision_types import (
@@ -98,11 +100,11 @@ class Point_Cloud(Asset):
     """포인트 클라우드 데이터를 관리하는 Asset."""
     relative_path: str # 데이터 소스 폴더 기준 상대 경로 (npz)
     points: VEC_3D = field(
-        default_factory=lambda: np.empty((0, 3), dtype=np.float32), 
+        default_factory=lambda: np.empty((0, 3), dtype=np.float32),
         repr=False
     )
     colors: VEC_3D = field(
-        default_factory=lambda: np.empty((0, 3), dtype=np.float32), 
+        default_factory=lambda: np.empty((0, 3), dtype=np.float32),
         repr=False
     )
 
@@ -128,9 +130,9 @@ class Point_Cloud(Asset):
 
 
 @dataclass
-class Gaussian_3DGS(Asset):
+class Gaussian_3D(Asset):
     """3D Gaussian Splatting 모델의 파라미터를 관리하는 Asset."""
-    relative_path: str # 데이터 소스 폴더 기준 상대 경로 (npz)
+    relative_path: str # 데이터 소스 폴더 기준 상대 경로 (npz, ply)
     # --- mutable default를 안전하게 생성하기 위해 default_factory 사용 ---
     points: VEC_3D = field(
         default_factory=lambda: np.empty((0, 3), dtype=np.float32),
@@ -147,7 +149,7 @@ class Gaussian_3DGS(Asset):
     rotations: VEC_4D = field(
         default_factory=lambda: np.empty((0, 4), dtype=np.float32),
         repr=False
-    )
+    )  # x, y, z, w
     # 3DGS의 SH(Spherical Harmonics) 계수 또는 일반 RGB 값으로 활용 가능.
     # SH features는 (N, sh_degree**2, 3) 이지만, 편의상 2D로 저장/로드
     # 예: SH degree 3 (16) * 3 channels = 48
@@ -160,31 +162,197 @@ class Gaussian_3DGS(Asset):
         return {"relative_path": self.relative_path}
 
     @classmethod
-    def From_dict(cls, data: dict) -> Gaussian_3DGS:
+    def From_dict(cls, data: dict) -> Gaussian_3D:
         return cls(relative_path=data["relative_path"])
 
+    # --- 데이터 처리 로직 ---
+    def __Convert_to_weight(self, display_data: dict[str, NDArray]):
+        """디스플레이용 데이터를 학습용 가중치(원본 파라미터)로 변환하여 객체에 저장."""
+        self.points = display_data['points']
+        self.rotations = display_data['rotations']
+        self.colors = display_data['colors']
+
+        # Logit (Sigmoid의 역연산)
+        _ep = 1e-10
+        _op_clamped = np.clip(display_data['opacities'], _ep, 1 - _ep)
+        self.opacities = -np.log(1 / _op_clamped - 1)
+
+        # Log (Exp의 역연산)
+        self.scales = np.log(display_data['scales'])
+
+    def __Ready_to_display(self) -> dict[str, NDArray]:
+        """객체의 학습용 가중치를 디스플레이용 최종 값으로 변환."""
+        return {
+            "points": self.points,
+            "opacities": 1 / (1 + np.exp(-self.opacities)),  # Sigmoid
+            "scales": np.exp(self.scales),  # Exp
+            "rotations": self.rotations,
+            "colors": self.colors
+        }
+
+    # --- 파일 포맷별 순수 I/O 함수 ---
+    def __Load_from_npz(self, file_path: Path) -> dict[str, NDArray]:
+        """npz 파일에서 디스플레이용 데이터를 읽어 dict로 반환."""
+        with np.load(file_path) as data:
+            return dict(data)
+
+    def __Save_to_npz(self, file_path: Path, data: dict[str, NDArray]):
+        """주어진 디스플레이용 데이터를 npz 파일로 저장."""
+        np.savez(file_path, **data)
+
+    def __Load_from_ply(self, file_path: Path) -> dict[str, NDArray]:
+        """PLY 파일에서 디스플레이용 데이터를 읽어 dict로 반환."""
+        _data = PlyData.read(file_path)
+        _vtx: PlyElement = _data['vertex']
+
+        _pts = np.vstack([_vtx['x'], _vtx['y'], _vtx['z']]).T
+        _rots = np.vstack([
+            _vtx['rot_0'], _vtx['rot_1'], _vtx['rot_2'], _vtx['rot_3']
+        ]).T
+        _rots /= np.linalg.norm(_rots, axis=1, keepdims=True)
+
+        _prop_names = [
+            p.name for p in _vtx.properties if p.name.startswith("f_rest_")]
+        _sh_ac_ns = sorted(
+            _prop_names,
+            key=lambda name: int(name.split('_')[-1])
+        )
+        _sh_ac = np.zeros((_pts.shape[0], len(_sh_ac_ns)), dtype=np.float32)
+        for i, name in enumerate(_sh_ac_ns):
+            _sh_ac[:, i] = _vtx[name]
+
+        # 최종 SH 계수 배열 생성 (N, 48)
+        _clrs = np.zeros((_pts.shape[0], 48), dtype=np.float32)
+        _sh_combined = np.concatenate([
+            np.vstack([_vtx['f_dc_0'], _vtx['f_dc_1'], _vtx['f_dc_2']]).T,
+            _sh_ac
+        ], axis=1)
+        _clrs[:, :_sh_combined.shape[1]] = _sh_combined
+
+        return {
+            "points": _pts,
+            "opacities": _vtx['opacity'][..., None],
+            "scales": np.vstack(
+                [_vtx['scale_0'], _vtx['scale_1'], _vtx['scale_2']]).T,
+            "rotations": _rots,
+            "colors": _clrs
+        }
+
+    def __Save_to_ply(self, file_path: Path, data: dict[str, NDArray]):
+        """주어진 디스플레이용 데이터를 PLY 파일로 저장."""
+        _pts, _opcts, _scls, _rots, _clrs = (
+            data["points"], data["opacities"], data["scales"],
+            data["rotations"], data["colors"]
+        )
+        _n_pts = _pts.shape[0]
+
+        # PLY 엘리먼트의 데이터 타입 정의
+        _dtype_list = [
+            ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
+            ('nx', 'f4'), ('ny', 'f4'), ('nz', 'f4'),
+            ('f_dc_0', 'f4'), ('f_dc_1', 'f4'), ('f_dc_2', 'f4'),
+            ('opacity', 'f4'),
+            ('scale_0', 'f4'), ('scale_1', 'f4'), ('scale_2', 'f4'),
+            ('rot_0', 'f4'), ('rot_1', 'f4'), ('rot_2', 'f4'), ('rot_3', 'f4')
+        ]
+
+        # SH AC(고차항) 이름 동적 추가
+        for i in range(_clrs.shape[1] - 3):
+            _dtype_list.append((f'f_rest_{i}', 'f4'))
+
+        _ele = np.empty(_n_pts, dtype=_dtype_list)
+
+        # 속성 배열을 순서에 맞게 하나로 합침
+        attrs = np.concatenate(
+            (
+                _pts, np.zeros_like(_pts),
+                _clrs[:, :3],
+                _opcts,
+                _scls,
+                _rots,
+                _clrs[:, 3:]
+            ),
+            axis=1
+        )
+
+        _ele[:] = [tuple(row) for row in attrs]
+        PlyData([PlyElement.describe(_ele, 'vertex')]).write(file_path)
+
+    # --- 메인 데이터 입출력 컨트롤러 ---
     def Load_data(self, data_path: Path):
-        """npz 파일에서 3DGS 파라미터를 불러옴."""
-        with np.load(data_path / self.relative_path) as data:
-            self.points = data['points']
-            self.opacities = data['opacities']
-            self.scales = data['scales']
-            self.rotations = data['rotations']
-            self.colors = data['colors']
+        """파일에서 디스플레이용 데이터를 읽어와 학습용 가중치로 변환 후 객체에 저장."""
+        _f_path = data_path / self.relative_path
+        _ext = _f_path.suffix
+
+        if _ext == ".npz":
+            _dp_data = self.__Load_from_npz(_f_path)
+        elif _ext == ".ply":
+            _dp_data = self.__Load_from_ply(_f_path)
+        else:
+            raise ValueError(f"지원하지 않는 파일 확장자입니다: {_ext}")
+
+        self.__Convert_to_weight(_dp_data)
 
     def Save_data(self, data_path: Path):
-        """3DGS 파라미터를 npz 파일로 저장."""
-        if self.points is not None: # 모든 데이터 존재 여부 확인 필요
-            _f_name = data_path / self.relative_path
-            _f_name.parent.mkdir(exist_ok=True, parents=True)
-            np.savez(
-                _f_name,
-                points=self.points,
-                opacities=self.opacities,
-                scales=self.scales,
-                rotations=self.rotations,
-                colors=self.colors
-            )
+        """객체의 학습용 가중치를 디스플레이용 데이터로 변환하여 파일에 저장."""
+        if self.points.shape[0] == 0:
+            return
+
+        _f_path = data_path / self.relative_path
+        _f_path.parent.mkdir(exist_ok=True, parents=True)
+        _ext = _f_path.suffix
+
+        _dp_data = self.__Ready_to_display()
+
+        if _ext == ".npz":
+            self.__Save_to_npz(_f_path, _dp_data)
+        elif _ext == ".ply":
+            self.__Save_to_ply(_f_path, _dp_data)
+        else:
+            raise ValueError(f"지원하지 않는 파일 확장자입니다: {_ext}")
+
+
+def Create_test_3DGS(relative_path="test_data.ply") -> Gaussian_3D:
+    """
+    테스트와 동일한 데이터를 생성하여 Gaussian_3D 객체를 반환합니다.
+    """
+    gau_xyz = np.array([
+        [0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]
+    ], dtype=np.float32)
+
+    gau_rot = np.array([
+        [0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1]
+    ], dtype=np.float32)
+
+    gau_s = np.array([
+        [0.03, 0.03, 0.03], [0.2, 0.03, 0.03],
+        [0.03, 0.2, 0.03], [0.03, 0.03, 0.2]
+    ], dtype=np.float32)
+
+    gau_a = np.array([[1], [1], [1], [1]], dtype=np.float32)
+
+    # 기본 RGB 색상 정의 (SH 0차 계수로 사용될 값)
+    gau_c_rgb = np.array([
+        [1, 0, 1], [1, 0, 0], [0, 1, 0], [0, 0, 1]
+    ], dtype=np.float32)
+
+    # 셰이더 활성화 함수의 역연산을 적용하여 SH 0차 계수(DC) 생성
+    C0 = 0.28209479177387814
+    sh_dc = (gau_c_rgb - 0.5) / C0
+
+    # colors 필드(N, 48) 형태에 맞게 나머지 SH 계수(AC)를 0으로 채움
+    num_points = gau_xyz.shape[0]
+    sh_ac_padding = np.zeros((num_points, 45), dtype=np.float32)
+    sh_features = np.concatenate([sh_dc, sh_ac_padding], axis=1)
+
+    return Gaussian_3D(
+        relative_path=relative_path,
+        points=gau_xyz,
+        rotations=gau_rot,
+        scales=gau_s,
+        opacities=gau_a,
+        colors=sh_features
+    )
 
 
 @dataclass
@@ -196,7 +364,7 @@ class Scene(Asset):
     ASSET_TYPE_REGISTRY: ClassVar[dict[str, Type[Asset]]] = {
         "Image": Image,
         "Point_Cloud": Point_Cloud,
-        "Gaussian_3DGS": Gaussian_3DGS,
+        "Gaussian_3DGS": Gaussian_3D,
     }
 
     name: str
