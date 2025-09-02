@@ -28,7 +28,7 @@
 
 ### 📚 Requirements
 
-- [python_ex](https://github.com/SEOULTECH-AIS-gyounghun6612/AIS_python_ex.git)
+- [python_toolbox](https://github.com/SEOULTECH-AIS-gyounghun6612/AIS_python_toolbox.git)
 
 - scipy
 
