@@ -310,19 +310,15 @@ def Create_test_3DGS(relative_path="test_data.ply") -> Gaussian_3D:
 
     gau_a = np.array([[1], [1], [1], [1]], dtype=np.float32)
 
-    # 기본 RGB 색상 정의 (SH 0차 계수로 사용될 값)
+    # 기본 RGB 색상 정의
     gau_c_rgb = np.array([
         [1, 0, 1], [1, 0, 0], [0, 1, 0], [0, 0, 1]
     ], dtype=np.float32)
 
-    # 셰이더 활성화 함수의 역연산을 적용하여 SH 0차 계수(DC) 생성
-    C0 = 0.28209479177387814
-    sh_dc = (gau_c_rgb - 0.5) / C0
-
     # colors 필드(N, 48) 형태에 맞게 나머지 SH 계수(AC)를 0으로 채움
     num_points = gau_xyz.shape[0]
-    sh_ac_padding = np.zeros((num_points, 45), dtype=np.float32)
-    sh_features = np.concatenate([sh_dc, sh_ac_padding], axis=1)
+    sh_features = np.zeros((num_points, 48), dtype=np.float32)
+    sh_features[:, :3] = gau_c_rgb
 
     return Gaussian_3D(
         relative_path=relative_path,
