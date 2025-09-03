@@ -14,7 +14,7 @@ L_TO_R = np.array([ # 좌표계 변환(Left-to-Right Handed) 상수
 class Convert:
     """회전, 좌표계 변환 등 기하학 데이터 변환 클래스."""
     @staticmethod
-    def Compute_3D_covariance(
+    def Compute_3d_covariance(
         scales: VEC_3D, rot: VEC_4D
     ) -> tuple[VEC_3D, VEC_3D]:
         """3D 가우시안의 공분산 행렬의 상삼각행렬(upper triangular) 성분 계산."""
@@ -23,24 +23,24 @@ class Convert:
         _mat = R.from_quat(_norm_rot).as_matrix()
 
         # 스케일 행렬 생성
-        S = np.zeros((scales.shape[0], 3, 3), dtype=np.float32)
-        S[:, 0, 0] = scales[:, 0]
-        S[:, 1, 1] = scales[:, 1]
-        S[:, 2, 2] = scales[:, 2]
+        _s = np.zeros((scales.shape[0], 3, 3), dtype=np.float32)
+        _s[:, 0, 0] = scales[:, 0]
+        _s[:, 1, 1] = scales[:, 1]
+        _s[:, 2, 2] = scales[:, 2]
 
         # 공분산 계산: Sigma = R * S * S^T * R^T = (R*S) * (R*S)^T
-        M = _mat @ S
-        Sigma = M @ np.transpose(M, (0, 2, 1))
+        _m = _mat @ _s
+        _sigma = _m @ np.transpose(_m, (0, 2, 1))
 
         # 상삼각행렬 성분 추출
-        covA = np.stack([
-            Sigma[:, 0, 0], Sigma[:, 0, 1], Sigma[:, 0, 2]
+        _covA = np.stack([
+            _sigma[:, 0, 0], _sigma[:, 0, 1], _sigma[:, 0, 2]
         ], axis=1)
-        covB = np.stack([
-            Sigma[:, 1, 1], Sigma[:, 1, 2], Sigma[:, 2, 2]
+        _covB = np.stack([
+            _sigma[:, 1, 1], _sigma[:, 1, 2], _sigma[:, 2, 2]
         ], axis=1)
 
-        return covA, covB
+        return _covA, _covB
 
     @staticmethod
     def From_matrix_to_quat(mat: ROT_M) -> VEC_4D:
@@ -74,10 +74,9 @@ class Convert:
         """좌표계(Handedness) 변환."""
         if mode != "L2R":
             raise NotImplementedError("R2L 모드는 아직 구현되지 않음.")
-        tf_mat = L_TO_R
 
         if obj.ndim == 2: # 포인트(VEC_3D, VEC_4D)인 경우
             pts_h = Convert.To_homogeneous(obj) if obj.shape[1] == 3 else obj
-            return (tf_mat @ pts_h.T).T[:, :3]
+            return (L_TO_R @ pts_h.T).T[:, :3]
 
-        return tf_mat @ obj # 변환 행렬(TF_M)인 경우
+        return L_TO_R @ obj # 변환 행렬(TF_M)인 경우

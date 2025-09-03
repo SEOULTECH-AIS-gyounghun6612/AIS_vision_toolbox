@@ -1,77 +1,48 @@
+"""vision asset과 scene 구조 관리를 위한 데이터 모델.
 
-
+이 클래스들은 순수한 데이터 컨테이너입니다. 모든 파일 I/O 및 처리 연산은
+'vision.core' 모듈에서 처리합니다.
+"""
 
 from __future__ import annotations
-from typing import Type, ClassVar
+from typing import Type
 from dataclasses import dataclass, field
-from pathlib import Path
-
 from abc import ABC, abstractmethod
 import numpy as np
-from numpy.typing import NDArray
 
-from plyfile import PlyData, PlyElement
+from .vision_types import IN_M, TF_M, IMG_SIZE, VEC_3D, IMG_3C
 
-import cv2
+__all__ = [
+    "Asset", "Image", "Point_Cloud", "Camera", "Scene"
+]
 
-from .utils.vision_types import (
-    IN_M, TF_M, IMG_SIZE, VEC_1D, VEC_3D, VEC_4D, IMG_3C)
+# 타입 이름을 클래스에 매핑하는 레지스트리. 직렬화 해제(deserialization) 시 사용됩니다.
+ASSET_CLASS_REGISTRY: dict[str, Type[Asset]] = {}
 
-__all__ = ["Asset", "Camera", "Image", "Point_Cloud", "Scene", "Capture"]
-
+def _Register_asset_type(cls: Type[Asset]) -> Type[Asset]:
+    """Asset 하위 클래스를 직렬화를 위해 자동으로 등록하는 데코레이터."""
+    ASSET_CLASS_REGISTRY[cls.__name__] = cls
+    return cls
 
 @dataclass
 class Asset(ABC):
-    """저장/로드가 가능한 모든 데이터 객체의 추상 기본 클래스."""
+    """모든 직렬화 가능한 데이터 객체의 추상 기본 클래스."""
     @abstractmethod
     def To_dict(self) -> dict:
-        """객체를 직렬화 가능한 dict로 변환."""
+        """객체를 딕셔너리로 직렬화합니다."""
+        raise NotImplementedError
 
     @classmethod
     @abstractmethod
     def From_dict(cls, data: dict) -> Asset:
-        """dict로부터 객체를 생성."""
+        """딕셔너리로부터 객체를 생성합니다."""
+        raise NotImplementedError
 
-    @abstractmethod
-    def Load_data(self, data_path: Path):
-        """대용량 데이터를 메모리로 불러옴."""
-
-    @abstractmethod
-    def Save_data(self, data_path: Path):
-        """대용량 데이터를 파일로 저장함."""
-
-
-@dataclass
-class Camera(Asset):
-    """카메라의 고유한 내부 파라미터만 담는 Asset."""
-    intrinsics: IN_M
-    image_size: IMG_SIZE
-
-    def To_dict(self) -> dict:
-        return {
-            "intrinsics": self.intrinsics.tolist(),
-            "image_size": self.image_size.tolist()
-        }
-
-    @classmethod
-    def From_dict(cls, data: dict) -> Camera:
-        return cls(
-            intrinsics=np.array(data["intrinsics"]),
-            image_size=np.array(data["image_size"])
-        )
-
-    def Load_data(self, data_path: Path):
-        pass  # No large data to load
-
-    def Save_data(self, data_path: Path):
-        pass  # No large data to save
-
-
+@_Register_asset_type
 @dataclass
 class Image(Asset):
-    """이미지 데이터와 파일 경로를 관리하는 Asset."""
-    relative_path: str  # 데이터 소스 폴더 기준 상대 경로
-    # 실제 이미지 데이터는 필요시 load_data()로 불러옴 (Lazy Loading)
+    """이미지 데이터용 Asset. 'data' 필드는 I/O 함수에 의해 채워집니다."""
+    relative_path: str
     data: IMG_3C | None = field(default=None, repr=False)
 
     def To_dict(self) -> dict:
@@ -81,32 +52,15 @@ class Image(Asset):
     def From_dict(cls, data: dict) -> Image:
         return cls(relative_path=data["relative_path"])
 
-    def Load_data(self, data_path: Path):
-        """지정된 소스 경로에서 이미지 데이터를 불러옴."""
-        self.data = cv2.imread(str(data_path / self.relative_path))
-        self.data = cv2.cvtColor(self.data, cv2.COLOR_BGR2RGB)
-
-    def Save_data(self, data_path: Path):
-        """지정된 소스 경로에 이미지 데이터를 저장."""
-        if self.data is not None:
-            _f_name = data_path / self.relative_path
-            _f_name.parent.mkdir(exist_ok=True, parents=True)
-            # OpenCV는 BGR 순서이므로 변환 후 저장
-            cv2.imwrite(str(_f_name), cv2.cvtColor(self.data, cv2.COLOR_RGB2BGR))
-
-
+@_Register_asset_type
 @dataclass
 class Point_Cloud(Asset):
-    """포인트 클라우드 데이터를 관리하는 Asset."""
-    relative_path: str # 데이터 소스 폴더 기준 상대 경로 (npz)
+    """포인트 클라우드 데이터용 Asset."""
+    relative_path: str
     points: VEC_3D = field(
-        default_factory=lambda: np.empty((0, 3), dtype=np.float32),
-        repr=False
-    )
+        default_factory=lambda: np.empty((0, 3), dtype=np.float32), repr=False)
     colors: VEC_3D = field(
-        default_factory=lambda: np.empty((0, 3), dtype=np.float32),
-        repr=False
-    )
+        default_factory=lambda: np.empty((0, 3), dtype=np.uint8), repr=False)
 
     def To_dict(self) -> dict:
         return {"relative_path": self.relative_path}
@@ -115,356 +69,80 @@ class Point_Cloud(Asset):
     def From_dict(cls, data: dict) -> Point_Cloud:
         return cls(relative_path=data["relative_path"])
 
-    def Load_data(self, data_path: Path):
-        """npz 파일에서 포인트 클라우드 데이터를 불러옴."""
-        with np.load(data_path / self.relative_path) as data:
-            self.points = data['points']
-            self.colors = data['colors']
-
-    def Save_data(self, data_path: Path):
-        """포인트 클라우드 데이터를 npz 파일로 저장."""
-        if self.points is not None and self.colors is not None:
-            _f_name = data_path / self.relative_path
-            _f_name.parent.mkdir(exist_ok=True, parents=True)
-            np.savez(_f_name, points=self.points, colors=self.colors)
-
-
+@_Register_asset_type
 @dataclass
-class Gaussian_3D(Asset):
-    """3D Gaussian Splatting 모델의 파라미터를 관리하는 Asset."""
-    relative_path: str # 데이터 소스 폴더 기준 상대 경로 (npz, ply)
-    # --- mutable default를 안전하게 생성하기 위해 default_factory 사용 ---
-    points: VEC_3D = field(
-        default_factory=lambda: np.empty((0, 3), dtype=np.float32),
-        repr=False
-    )
-    opacities: VEC_1D = field(
-        default_factory=lambda: np.empty((0, 1), dtype=np.float32),
-        repr=False
-    )
-    scales: VEC_3D = field(
-        default_factory=lambda: np.empty((0, 3), dtype=np.float32),
-        repr=False
-    )
-    rotations: VEC_4D = field(
-        default_factory=lambda: np.empty((0, 4), dtype=np.float32),
-        repr=False
-    )  # x, y, z, w
-    # 3DGS의 SH(Spherical Harmonics) 계수 또는 일반 RGB 값으로 활용 가능.
-    # SH features는 (N, sh_degree**2, 3) 이지만, 편의상 2D로 저장/로드
-    # 예: SH degree 3 (16) * 3 channels = 48
-    colors: NDArray = field(
-        default_factory=lambda: np.empty((0, 48), dtype=np.float32),
-        repr=False
-    )
-
-    def To_dict(self) -> dict:
-        return {"relative_path": self.relative_path}
-
-    @classmethod
-    def From_dict(cls, data: dict) -> Gaussian_3D:
-        return cls(relative_path=data["relative_path"])
-
-    # --- 데이터 처리 로직 ---
-    def __Convert_to_weight(self, dp_data: dict[str, NDArray]):
-        """디스플레이용 데이터를 학습용 가중치(원본 파라미터)로 변환하여 객체에 저장."""
-        self.points = dp_data['points']
-        self.rotations = dp_data['rotations']
-        self.colors = dp_data['colors']
-
-        _ep = 1e-10
-        _op_clamped = np.clip(dp_data['opacities'], _ep, 1 - _ep)
-        self.opacities = -np.log(1 / _op_clamped - 1)  # Logit
-        self.scales = np.log(dp_data['scales']) # Log
-
-    def __Ready_to_display_dict(self) -> dict[str, NDArray]:
-        return {
-            "points": self.points,
-            "rotations": self.rotations,
-            "scales": np.exp(self.scales),  # Exp
-            "opacities": 1 / (1 + np.exp(-self.opacities)),  # Sigmoid
-            "colors": self.colors
-        }
-
-    def Ready_to_display_flat(self) -> np.ndarray:
-        _attr = self.__Ready_to_display_dict()
-        return np.concatenate(list(_attr.values()), axis=1)
-
-    # --- 파일 포맷별 순수 I/O 함수 ---
-    def __Load_from_npz(self, file_path: Path) -> dict[str, NDArray]:
-        """npz 파일에서 디스플레이용 데이터를 읽어 dict로 반환."""
-        with np.load(file_path) as data:
-            return dict(data)
-
-    def __Save_to_npz(self, file_path: Path, data: dict[str, NDArray]):
-        """주어진 디스플레이용 데이터를 npz 파일로 저장."""
-        np.savez(file_path, **data)
-
-    def __Load_from_ply(self, file_path: Path) -> dict[str, NDArray]:
-        """PLY 파일에서 디스플레이용 데이터를 읽어 dict로 반환."""
-        _data = PlyData.read(file_path)
-        _vtx: PlyElement = _data['vertex']
-
-        _pts = np.vstack([_vtx['x'], _vtx['y'], _vtx['z']]).T
-        _rots = np.vstack([
-            _vtx['rot_0'], _vtx['rot_1'], _vtx['rot_2'], _vtx['rot_3']
-        ]).T
-        _rots /= np.linalg.norm(_rots, axis=1, keepdims=True)
-
-        _prop_names = [
-            p.name for p in _vtx.properties if p.name.startswith("f_rest_")
-        ]
-        _sh_ac_ns = sorted(
-            _prop_names,
-            key=lambda name: int(name.split('_')[-1])
-        )
-        _sh_ac = np.zeros((_pts.shape[0], len(_sh_ac_ns)), dtype=np.float32)
-        for i, name in enumerate(_sh_ac_ns):
-            _sh_ac[:, i] = _vtx[name]
-
-        # 최종 SH 계수 배열 생성 (N, 48)
-        _clrs = np.zeros((_pts.shape[0], 48), dtype=np.float32)
-        _sh_combined = np.concatenate([
-            np.vstack([_vtx['f_dc_0'], _vtx['f_dc_1'], _vtx['f_dc_2']]).T,
-            _sh_ac
-        ], axis=1)
-        _clrs[:, :_sh_combined.shape[1]] = _sh_combined
-
-        return {
-            "points": _pts,
-            "opacities": _vtx['opacity'][..., None],
-            "scales": np.vstack(
-                [_vtx['scale_0'], _vtx['scale_1'], _vtx['scale_2']]).T,
-            "rotations": _rots,
-            "colors": _clrs
-        }
-
-    def __Save_to_ply(self, file_path: Path, data: dict[str, NDArray]):
-        # PLY 엘리먼트의 데이터 타입 정의
-        _d_list = [
-            ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
-            ('rot_0', 'f4'), ('rot_1', 'f4'), ('rot_2', 'f4'), ('rot_3', 'f4'),
-            ('scale_0', 'f4'), ('scale_1', 'f4'), ('scale_2', 'f4'),
-            ('opacity', 'f4'),
-            ('f_dc_0', 'f4'), ('f_dc_1', 'f4'), ('f_dc_2', 'f4')
-        ]
-
-        # SH AC(고차항) 이름 동적 추가
-        for i in range(data["colors"].shape[1] - 3):
-            _d_list.append((f'f_rest_{i}', 'f4'))
-
-        _attrs = np.concatenate(list(data.values()), axis=1)
-        _st_attrs = _attrs.astype(np.float32).view(np.dtype(_d_list)).squeeze()
-        PlyData([PlyElement.describe(_st_attrs, 'vertex')]).write(file_path)
-
-    # --- 메인 데이터 입출력 컨트롤러 ---
-    def Load_data(self, data_path: Path):
-        """파일에서 디스플레이용 데이터를 읽어와 학습용 가중치로 변환 후 객체에 저장."""
-        _f_path = data_path / self.relative_path
-        _ext = _f_path.suffix
-
-        if _ext == ".npz":
-            _dp_data = self.__Load_from_npz(_f_path)
-        elif _ext == ".ply":
-            _dp_data = self.__Load_from_ply(_f_path)
-        else:
-            raise ValueError(f"지원하지 않는 파일 확장자입니다: {_ext}")
-
-        self.__Convert_to_weight(_dp_data)
-
-    def Save_data(self, data_path: Path):
-        """객체의 학습용 가중치를 디스플레이용 데이터로 변환하여 파일에 저장."""
-        if self.points.shape[0] == 0:
-            return
-
-        _f_path = data_path / self.relative_path
-        _f_path.parent.mkdir(exist_ok=True, parents=True)
-        _ext = _f_path.suffix
-
-        _dp_data = self.__Ready_to_display_dict()
-
-        if _ext == ".npz":
-            self.__Save_to_npz(_f_path, _dp_data)
-        elif _ext == ".ply":
-            self.__Save_to_ply(_f_path, _dp_data)
-        else:
-            raise ValueError(f"지원하지 않는 파일 확장자입니다: {_ext}")
-
-
-def Create_test_3DGS(relative_path="test_data.ply") -> Gaussian_3D:
-    """
-    테스트와 동일한 데이터를 생성하여 Gaussian_3D 객체를 반환합니다.
-    """
-    gau_xyz = np.array([
-        [0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]
-    ], dtype=np.float32)
-
-    gau_rot = np.array([
-        [0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1], [0, 0, 0, 1]
-    ], dtype=np.float32)
-
-    gau_s = np.array([
-        [0.03, 0.03, 0.03], [0.2, 0.03, 0.03],
-        [0.03, 0.2, 0.03], [0.03, 0.03, 0.2]
-    ], dtype=np.float32)
-
-    gau_a = np.array([[1], [1], [1], [1]], dtype=np.float32)
-
-    # 기본 RGB 색상 정의
-    gau_c_rgb = np.array([
-        [1, 0, 1], [1, 0, 0], [0, 1, 0], [0, 0, 1]
-    ], dtype=np.float32)
-
-    # colors 필드(N, 48) 형태에 맞게 나머지 SH 계수(AC)를 0으로 채움
-    num_points = gau_xyz.shape[0]
-    sh_features = np.zeros((num_points, 48), dtype=np.float32)
-    sh_features[:, :3] = gau_c_rgb
-
-    return Gaussian_3D(
-        relative_path=relative_path,
-        points=gau_xyz,
-        rotations=gau_rot,
-        scales=gau_s,
-        opacities=gau_a,
-        colors=sh_features
-    )
-
-
-@dataclass
-class Scene(Asset):
-    """
-    하나의 시점(Pose)과 관측된 데이터 Asset들의 컨테이너.
-    자신에게 속한 Asset들의 데이터 처리를 위임함.
-    """
-    ASSET_TYPE_REGISTRY: ClassVar[dict[str, Type[Asset]]] = {
-        "Image": Image,
-        "Point_Cloud": Point_Cloud,
-        "Gaussian_3DGS": Gaussian_3D,
-    }
-
+class Camera(Asset):
+    """내부 파라미터, 자세, 그리고 연관된 asset들을 포함하는 단일 카메라 컨테이너."""
     name: str
     pose: TF_M
+    intrinsics: IN_M
+    image_size: IMG_SIZE
     assets: dict[str, Asset] = field(default_factory=dict)
 
-    def Load_data(self, data_path: Path) -> None:
-        """자신이 가진 모든 Asset의 대용량 데이터를 불러옵니다."""
-        print(f"\n--- Loading assets for Scene: {self.name} ---")
-        for key, asset in self.assets.items():
-            print(f"Loading asset '{key}'...")
-            asset.Load_data(data_path)
-
-    def Save_data(self, data_path: Path) -> None:
-        """자신이 가진 모든 Asset의 대용량 데이터를 저장합니다."""
-        print(f"\n--- Saving assets for Scene: {self.name} ---")
-        for key, asset in self.assets.items():
-            print(f"Saving asset '{key}'...")
-            asset.Save_data(data_path)
-
     def To_dict(self) -> dict:
-        """Scene 객체를 직렬화 가능한 dict로 변환합니다."""
-        _data = {
-            _k: {
-                "asset_type": type(_a).__name__,
-                "data": _a.To_dict()
-            } for _k, _a in self.assets.items()
+        return {
+            "name": self.name,
+            "pose": self.pose.tolist(),
+            "intrinsics": self.intrinsics.tolist(),
+            "image_size": self.image_size.tolist(),
+            "assets": {
+                key: {
+                    "asset_type": type(asset).__name__,
+                    "data": asset.To_dict()
+                }
+                for key, asset in self.assets.items()
+            }
         }
-        return {"name": self.name, "pose": self.pose.tolist(), "assets": _data}
 
     @classmethod
-    def From_dict(cls, data: dict) -> Scene:
-        """dict로부터 Scene 객체를 생성합니다."""
-        _assets, _reg = {}, cls.ASSET_TYPE_REGISTRY
-
-        for _k, _info in data["assets"].items():
-            _type_name = _info["asset_type"]
-            _data = _info["data"]
-
-            if _type_name not in _reg:
-                print(f"Warning: Asset type missing for key '{_k}'. Skipping.")
-                continue
-
-            _assets[_k] = _reg[_type_name].From_dict(_data)
+    def From_dict(cls, data: dict) -> Camera:
+        assets = {}
+        for key, info in data.get("assets", {}).items():
+            asset_class = ASSET_CLASS_REGISTRY.get(info["asset_type"])
+            if asset_class:
+                assets[key] = asset_class.From_dict(info["data"])
 
         return cls(
             name=data["name"],
             pose=np.array(data["pose"]),
-            assets=_assets
+            intrinsics=np.array(data["intrinsics"]),
+            image_size=np.array(data["image_size"]),
+            assets=assets
         )
 
 @dataclass
-class Capture(Asset):
-    """
-    하나의 카메라와 배경 Scene을 기준으로, 여러 전경 Scene들을
-    조합하여 최종 결과물들을 정의하는 최상위 객체.
-    """
+class Scene(Asset):
+    """3D asset과 카메라 컬렉션을 포함하는 프로젝트 최상위 컨테이너."""
     name: str
-    camera: Camera
-    bg: Scene | None = None
-    fg: dict[int, Scene] = field(default_factory=dict)
-
-    # def get_effective_scenes(self) -> dict[int, Scene]:
-    #     """
-    #     배경과 모든 전경 Scene들을 조합하여
-    #     최종 Scene들의 딕셔너리를 계산.
-    #     """
-    #     _scenes = {}
-
-    #     _b = self.background_scene
-    #     _b_pose, _b_asset = (_b.pose, _b.assets) if _b else (np.eye(4), {})
-
-    #     for _fg_id, _fg_scene in self.foreground.items():
-    #         _f_pose = _b_pose @ _fg_scene.pose
-    #         _f_assets = {**_b_asset, **_fg_scene.assets}
-
-    #         # 반환되는 Scene 객체는 이제 process_load/save 메서드를 가짐
-    #         _scenes[_fg_id] = Scene(
-    #             name=f"{self.name}_effective_{_fg_id}",
-    #             pose=_f_pose,
-    #             assets=_f_assets
-    #         )
-    #     return _scenes
-
-    def Load_data(self, data_path: Path):
-        """자신과 모든 하위 Scene들의 데이터를 불러옵니다."""
-        print(f"--- Loading assets for Capture: {self.name} ---")
-        if self.bg:
-            self.bg.Load_data(data_path)
-        for fg_scene in self.fg.values():
-            fg_scene.Load_data(data_path)
-
-    def Save_data(self, data_path: Path):
-        """자신과 모든 하위 Scene들의 데이터를 저장합니다."""
-        print(f"--- Saving assets for Capture: {self.name} ---")
-        if self.bg:
-            self.bg.Save_data(data_path)
-        for fg_scene in self.fg.values():
-            fg_scene.Save_data(data_path)
-
+    assets: dict[str, Asset] = field(default_factory=dict)
+    cameras: dict[str, Camera] = field(default_factory=dict)
 
     def To_dict(self) -> dict:
-        """Capture 객체를 직렬화 가능한 dict로 변환."""
-        _b = self.bg
-        _f = self.fg
-
         return {
             "name": self.name,
-            "camera": self.camera.To_dict(),
-            "bg": _b.To_dict() if _b else None,
-            "fg": {
-                fg_id: fg_scene.To_dict() for fg_id, fg_scene in _f.items()
+            "assets": {
+                key: {
+                    "asset_type": type(asset).__name__,
+                    "data": asset.To_dict()
+                }
+                for key, asset in self.assets.items()
             },
+            "cameras": {
+                key: cam.To_dict() for key, cam in self.cameras.items()},
         }
 
     @classmethod
-    def From_dict(cls, data: dict) -> Capture:
-        """dict로부터 Capture 객체를 생성."""
+    def From_dict(cls, data: dict) -> Scene:
+        _assets = {}
+        for _k, _i in data.get("assets", {}).items():
+            _asset_class = ASSET_CLASS_REGISTRY.get(_i["asset_type"])
+            if _asset_class:
+                _assets[_k] = _asset_class.From_dict(_i["data"])
 
         return cls(
             name=data["name"],
-            camera=Camera.From_dict(data["camera"]),
-            bg=Scene.From_dict(data["bg"]) if "bg" in data else None,
-            fg={
-                int(fg_id): Scene.From_dict(fg_data)
-                for fg_id, fg_data in data.get("fg", {}).items()
-            },
+            assets=_assets,
+            cameras=dict((
+                _k, Camera.From_dict(_v)
+            ) for _k, _v in data.get("cameras", {}).items())
         )
