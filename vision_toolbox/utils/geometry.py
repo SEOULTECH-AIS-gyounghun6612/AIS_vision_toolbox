@@ -14,6 +14,33 @@ L_TO_R = np.array([ # 좌표계 변환(Left-to-Right Handed) 상수
 class Convert:
     """회전, 좌표계 변환 등 기하학 데이터 변환 클래스."""
     @staticmethod
+    def Compute_3D_covariance(scales: VEC_3D, rotations: VEC_4D) -> tuple[VEC_3D, VEC_3D]:
+        """3D 가우시안의 공분산 행렬의 상삼각행렬(upper triangular) 성분 계산."""
+        # 입력 회전(쿼터니언) 정규화
+        norm_rotations = rotations / np.linalg.norm(rotations, axis=1, keepdims=True)
+        R = R.from_quat(norm_rotations).as_matrix()
+
+        # 스케일 행렬 생성
+        S = np.zeros((scales.shape[0], 3, 3), dtype=np.float32)
+        S[:, 0, 0] = scales[:, 0]
+        S[:, 1, 1] = scales[:, 1]
+        S[:, 2, 2] = scales[:, 2]
+
+        # 공분산 계산: Sigma = R * S * S^T * R^T = (R*S) * (R*S)^T
+        M = R @ S
+        Sigma = M @ np.transpose(M, (0, 2, 1))
+
+        # 상삼각행렬 성분 추출
+        covA = np.stack([
+            Sigma[:, 0, 0], Sigma[:, 0, 1], Sigma[:, 0, 2]
+        ], axis=1)
+        covB = np.stack([
+            Sigma[:, 1, 1], Sigma[:, 1, 2], Sigma[:, 2, 2]
+        ], axis=1)
+
+        return covA, covB
+
+    @staticmethod
     def From_matrix_to_quat(mat: ROT_M) -> VEC_4D:
         """회전 행렬 -> 쿼터니언."""
         return R.from_matrix(mat).as_quat()

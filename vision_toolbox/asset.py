@@ -212,7 +212,8 @@ class Gaussian_3D(Asset):
         _rots /= np.linalg.norm(_rots, axis=1, keepdims=True)
 
         _prop_names = [
-            p.name for p in _vtx.properties if p.name.startswith("f_rest_")]
+            p.name for p in _vtx.properties if p.name.startswith("f_rest_")
+        ]
         _sh_ac_ns = sorted(
             _prop_names,
             key=lambda name: int(name.split('_')[-1])
@@ -367,7 +368,7 @@ class Scene(Asset):
         """Scene 객체를 직렬화 가능한 dict로 변환합니다."""
         _data = {
             _k: {
-                "asset_type": type(_a).__name__, 
+                "asset_type": type(_a).__name__,
                 "data": _a.To_dict()
             } for _k, _a in self.assets.items()
         }
