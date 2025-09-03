@@ -10,10 +10,10 @@ from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 import numpy as np
 
-from .vision_types import IN_M, TF_M, IMG_SIZE, VEC_3D, IMG_3C
+from .vision_types import IN_M, TF_M, IMG_SIZE, VEC_3D, IMG_3C, VEC_1D, VEC_4D
 
 __all__ = [
-    "Asset", "Image", "Point_Cloud", "Camera", "Scene"
+    "Asset", "Image", "Point_Cloud", "Gaussian_3DGS", "Camera", "Scene"
 ]
 
 # 타입 이름을 클래스에 매핑하는 레지스트리. 직렬화 해제(deserialization) 시 사용됩니다.
@@ -68,6 +68,24 @@ class Point_Cloud(Asset):
     @classmethod
     def From_dict(cls, data: dict) -> Point_Cloud:
         return cls(relative_path=data["relative_path"])
+
+
+@_Register_asset_type
+@dataclass
+class Gaussian_3DGS(Point_Cloud):
+    """3D Gaussian Splatting 데이터용 Asset."""
+    opacities: VEC_1D = field(
+        default_factory=lambda: np.empty((0, 1), dtype=np.float32), repr=False
+    )
+    scales: VEC_3D = field(
+        default_factory=lambda: np.empty((0, 3), dtype=np.float32), repr=False
+    )
+    rotations: VEC_4D = field(
+        default_factory=lambda: np.empty((0, 4), dtype=np.float32), repr=False
+    )
+    sh_features: np.ndarray = field(
+        default_factory=lambda: np.empty((0, 16, 3), dtype=np.float32), repr=False
+    )
 
 @_Register_asset_type
 @dataclass
